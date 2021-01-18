@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace UdpFile
 {
-    public class UdpFileTransportController
+    public class UdpFileClient
     {
         //TODO read from config
         private const int BufSize = 4*1024;
@@ -16,8 +16,15 @@ namespace UdpFile
             using var blockReader = new FileBlockReader(BufSize, srcFileInfo);
             var udpClient = new UdpClient();
             var sentCount = 0;
-            foreach (var (buf,count,index) in blockReader)
+            var cmd = new CommandPackage();
+            cmd.SeqId = TransportSeqFactory.NextId();
+            udpClient.SendAsync()
+            var info = new DataCommandInfo();
+            for (long i = 0; i < blockReader.MaxBlockIndex; i++)
             {
+                cmd.SeqId = TransportSeqFactory.NextId();
+                info.BlockIndex = i;
+                var (buf, count) = blockReader.QuickPrepare(ref cmd, ref info);
                 sentCount += await udpClient.SendAsync(buf, count, targetAddress);
             }
             await Console.Out.WriteLineAsync($"sent count: {sentCount}");

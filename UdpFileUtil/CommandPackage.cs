@@ -1,7 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.Unicode;
 
 namespace UdpFile
 {
@@ -52,7 +51,6 @@ namespace UdpFile
                 BinSerializableHelper.WriteTo(buf, start, t,sizeof(CommandPackage));
             }
         }
-        public int HeaderLength;
         public int SeqId;
         public CommandEnum Cmd;
     }
@@ -60,28 +58,30 @@ namespace UdpFile
     [StructLayout(LayoutKind.Sequential,Pack = 1)]
     public unsafe struct StartCommandInfo
     {
-        public void ReadFrom(byte[] buf, int start,out string targetFileName,in CommandPackage cmd)
+        public string ReadFrom(byte[] buf, int start)
         {
             fixed (void* t = &this)
             {
                 var size = sizeof(StartCommandInfo);
                 BinSerializableHelper.ReadFrom(buf, start, t, size);
-                var strLen = cmd.HeaderLength - sizeof(CommandPackage) - size;
-                targetFileName = strLen <= 0 ? string.Empty : Encoding.UTF8.GetString(buf, start + size, strLen);
+                return TargetFileNameLength <= 0 ? string.Empty : Encoding.UTF8.GetString(buf, start + size, TargetFileNameLength);
             }
         }
 
-        public void WriteTo(byte[] buf, int start, string targetFileName,out int appendedLen)
+        public void WriteTo(byte[] buf, int start, string targetFileName)
         {
             fixed (void* t = &this)
             {
-                BinSerializableHelper.WriteTo(buf, start, t,sizeof(StartCommandInfo));
-                appendedLen = Encoding.UTF8.GetBytes(targetFileName, 0, targetFileName.Length, buf, start);
+                var size = sizeof(StartCommandInfo);
+                TargetFileNameLength =
+                    Encoding.UTF8.GetBytes(targetFileName, 0, targetFileName.Length, buf, start + size);
+                BinSerializableHelper.WriteTo(buf, start, t,size);
             }
         }
 
         public long TargetFileSize;
         public int BlockSize;
+        public int TargetFileNameLength;
         //can not add directly as a member: string TargetFileName;
     }
 
@@ -136,21 +136,21 @@ namespace UdpFile
     public unsafe struct VerifyCommandInfo
     {
 
-        public void ReadFrom(byte[] buf, int start,out byte[] verificationList,in CommandPackage cmd)
+        public byte[] ReadFrom(byte[] buf, int start)
         {
             fixed (void* t = &this)
             {
                 var size = sizeof(VerifyCommandInfo);
                 BinSerializableHelper.ReadFrom(buf, start, t,size);
-                var len = cmd.HeaderLength - sizeof(CommandPackage) - size;
-                if (len <= 0)
+                if (Length <= 0)
                 {
-                    verificationList = Array.Empty<byte>();
+                    return Array.Empty<byte>();
                 }
                 else
                 {
-                    verificationList = new byte[len];
-                    Buffer.BlockCopy(buf, start + size, verificationList, 0, len);
+                    var verificationList = new byte[Length];
+                    Buffer.BlockCopy(buf, start + size, verificationList, 0, Length);
+                    return verificationList;
                 }
             }
         }
@@ -159,11 +159,15 @@ namespace UdpFile
         {
             fixed (void* t = &this)
             {
-                BinSerializableHelper.WriteTo(buf, start, t,sizeof(VerifyCommandInfo));
+                Length = verificationList.Length;
+                var size = sizeof(VerifyCommandInfo);
+                BinSerializableHelper.WriteTo(buf, start, t,size);
+                Buffer.BlockCopy(verificationList, 0, buf, start + size, Length);
             }
         }
 
         public byte Number;
+        public int Length;
         //can not add directly as a member: byte[] VerificationList;
     }
 
@@ -194,6 +198,7 @@ namespace UdpFile
     public struct AckListCommandInfo
     {
         public byte Number;
-        public int[] SeqId;
+        public int Length;
+        //can not add directly as a member: int[] SeqId;
     }
 }

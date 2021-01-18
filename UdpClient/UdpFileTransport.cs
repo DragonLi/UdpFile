@@ -48,7 +48,7 @@ namespace UdpFile
             #endif
             var watcher = Stopwatch.StartNew();
             watcher.Start();
-            await UdpFileTransportController.Sent(srcFileInfo,targetAddress,targetFsNm);
+            await UdpFileClient.Sent(srcFileInfo,targetAddress,targetFsNm);
             watcher.Stop();
             Console.Out.WriteLine($"finished with time: {watcher.Elapsed}");
         }

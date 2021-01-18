@@ -17,19 +17,19 @@ namespace UdpFile
         {
             var listenPort = 9999;
             var listener = new UdpClient(listenPort);
-            var groupEP = new IPEndPoint(IPAddress.Loopback, listenPort);
+            var group = new IPEndPoint(IPAddress.Loopback, listenPort);
             
             var state = ReceiverState.Listening;
             var cmd = new CommandPackage();
             var startCmd = new StartCommandInfo();
             FileBlockDumper? writer = null;
-            string targetFileName;
+            string targetFileName = String.Empty;
             var dataPack = new DataCommandInfo();
             try
             {
                 while (state != ReceiverState.Stop)
                 {
-                    var bytes = listener.Receive(ref groupEP);
+                    var bytes = listener.Receive(ref group);
                     if (bytes.Length <= 0)
                     {
                         continue;
@@ -39,7 +39,7 @@ namespace UdpFile
                     {
                         case CommandEnum.Start:
                         {
-                            startCmd.ReadFrom(bytes, offset,out targetFileName, in cmd);
+                            targetFileName = startCmd.ReadFrom(bytes, offset);
                             if (startCmd.BlockSize <= 0)
                             {
                                 continue;
@@ -57,7 +57,7 @@ namespace UdpFile
                             {
                                 continue;
                             }
-                            writer = new FileBlockDumper(targetFileName,startCmd.BlockSize,startCmd.TargetFileSize);
+                            writer = new FileBlockDumper(targetFsNm,startCmd.BlockSize,startCmd.TargetFileSize);
                             state = ReceiverState.Receiving;
                             break;
                         }
@@ -77,6 +77,8 @@ namespace UdpFile
                         }
                         case CommandEnum.Stop:
                         {
+                            writer?.Dispose();
+                            writer = null;
                             var stopInfo = new StopCommandInfo();
                             stopInfo.ReadFrom(bytes, offset);
                             break;
