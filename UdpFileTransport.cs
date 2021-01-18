@@ -2,12 +2,13 @@
 using System.Diagnostics;
 using System.IO;
 using System.Net;
+using System.Threading.Tasks;
 
 namespace UdpFile
 {
     static class Program
     {
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
             var fsNm = GetArgs(args,0);
             if (!File.Exists(fsNm))
@@ -43,7 +44,7 @@ namespace UdpFile
             Console.Out.WriteLine($"{fsNm},{ip},{targetFsNm}");
             var watcher = Stopwatch.StartNew();
             watcher.Start();
-            UdpFileTransportController.Sent(new FileInfo(fsNm),targetAddress,targetFsNm);
+            await UdpFileTransportController.Sent(new FileInfo(fsNm),targetAddress,targetFsNm);
             watcher.Stop();
             Console.Out.WriteLine($"finished with time: {watcher.Elapsed}");
             Console.Out.WriteLine($"run: diff -s {targetFsNm} {fsNm}");

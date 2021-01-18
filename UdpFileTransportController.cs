@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 using System.Net;
+using System.Net.Sockets;
+using System.Threading.Tasks;
 
 namespace UdpFile
 {
@@ -8,7 +10,7 @@ namespace UdpFile
     {
         private const int BufSize = 4*1024;
 
-        public static void Sent(FileInfo fsNm, IPAddress targetAddress, string targetFsNm)
+        public static async Task Sent(FileInfo fsNm, IPAddress targetAddress, string targetFsNm)
         {
             using var blockReader = new FileBlockReader(BufSize, fsNm);
             using var dumper = new FileBlockDumper(targetFsNm,BufSize,fsNm.Length);
@@ -21,9 +23,13 @@ namespace UdpFile
                 var (buf,readCount) = blockReader.Read(i);
                 dumper.WriteBlock(i, buf, readCount);
             }
+
+            var udpClient = new UdpClient();
+            IPEndPoint ep = new IPEndPoint(IPAddress.Loopback, 9999);
             foreach (var (buf,count,index) in blockReader)
             {
-                LogArray(buf, count,index); 
+                //LogArray(buf, count,index);
+                await udpClient.SendAsync(buf, count, ep);
             }
         }
 
