@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.IO.MemoryMappedFiles;
 using System.Net;
 
 namespace UdpFile
@@ -8,24 +7,27 @@ namespace UdpFile
     public class UdpFileTransportController
     {
         private const int BufSize = 4*1024;
-        private static readonly byte[] MmfBuf = new byte[BufSize];
+
         public static void Sent(FileInfo fsNm, IPAddress targetAddress, string targetFsNm)
         {
-            using var mmf = MemoryMappedFile.CreateFromFile(fsNm.FullName);
-            using var accessor = mmf.CreateViewAccessor();
-            using var dumper = new FileDumper(targetFsNm,BufSize,fsNm.Length);
+            using var blockReader = new FileBlockReader(BufSize, fsNm);
+            using var dumper = new FileBlockDumper(targetFsNm,BufSize,fsNm.Length);
             var total = fsNm.Length;
             var max = total / BufSize;
             max = total - max * BufSize > 0 ? max + 1 : max;
-            for (var i = 0; i < max; i++)
+            //reverse order to test memory map file randomly write function
+            for (var i = (int) (max -1); i >= 0; --i)
             {
-                var readCount = accessor.ReadArray(i*BufSize, MmfBuf, 0, MmfBuf.Length);
-                // LogArray(MmfBuf, readCount,i);
-                dumper.WriteBlock(i, MmfBuf, readCount);
+                var (buf,readCount) = blockReader.Read(i);
+                dumper.WriteBlock(i, buf, readCount);
+            }
+            foreach (var (buf,count,index) in blockReader)
+            {
+                LogArray(buf, count,index); 
             }
         }
 
-        private static void LogArray(byte[] buf, int readCount, int index)
+        private static void LogArray(byte[] buf, int readCount, long index)
         {
             var lineCharNum = 8;
             var start = index * BufSize;

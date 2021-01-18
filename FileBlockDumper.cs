@@ -4,16 +4,16 @@ using System.IO.MemoryMappedFiles;
 
 namespace UdpFile
 {
-    public class FileDumper : IDisposable
+    public class FileBlockDumper : IDisposable
     {
-        private MemoryMappedFile _mmf;
-        private MemoryMappedViewAccessor _accessor;
         private string _targetFsNm;
-        private readonly int _blockSize;
         private long _fileSize;
-        private FileStream _fs;
+        private readonly MemoryMappedFile _mmf;
+        private readonly MemoryMappedViewAccessor _accessor;
+        private readonly int _blockSize;
+        private readonly FileStream _fs;
 
-        public FileDumper(string targetFsNm, int bufSize, long fsSize)
+        public FileBlockDumper(string targetFsNm, int bufSize, long fsSize)
         {
             _targetFsNm = targetFsNm;
             _blockSize = bufSize;
@@ -33,7 +33,6 @@ namespace UdpFile
             _mmf.Dispose();
             _accessor.Dispose();
             _fs.Dispose();
-            Console.Out.WriteLine("file dump finished");
         }
     }
 }

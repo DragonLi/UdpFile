@@ -58,8 +58,17 @@ namespace UdpFile
                 }
             };
             diffProc.Start();
+
+            targetAddress = GetIpAddress("localhost");
+            Console.Out.WriteLine(targetAddress);
         }
 
+        private static IPAddress GetIpAddress(string ip)
+        {
+            if (ip.Equals("localhost"))
+                return IPAddress.Loopback;
+            return IPAddress.Parse(ip);
+        }
         private static string GetArgs(string[] args, int i) => i < args.Length ? args[i] : string.Empty;
     }
 }
