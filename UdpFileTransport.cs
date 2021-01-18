@@ -18,7 +18,7 @@ namespace UdpFile
             }
 
             var ip = GetArgs(args,1);
-            if (!IPAddress.TryParse(ip, out var targetAddress))
+            if (!IPEndPoint.TryParse(ip, out var targetAddress))
             {
                 Console.Out.WriteLine($"Ip not valid: {ip}");
                 return;
@@ -42,11 +42,35 @@ namespace UdpFile
             }
 
             Console.Out.WriteLine($"{fsNm},{ip},{targetFsNm}");
+            var srcFileInfo = new FileInfo(fsNm);
+            #if TestLocal
+            LocalMemoryFileTest(srcFileInfo, targetAddress, targetFsNm);
+            #endif
             var watcher = Stopwatch.StartNew();
             watcher.Start();
-            await UdpFileTransportController.Sent(new FileInfo(fsNm),targetAddress,targetFsNm);
+            await UdpFileTransportController.Sent(srcFileInfo,targetAddress,targetFsNm);
             watcher.Stop();
             Console.Out.WriteLine($"finished with time: {watcher.Elapsed}");
+        }
+
+        private static IPAddress GetIpAddress(string ip)
+        {
+            if (ip.Equals("localhost"))
+                return IPAddress.Loopback;
+            return IPAddress.Parse(ip);
+        }
+        private static string GetArgs(string[] args, int i) => i < args.Length ? args[i] : string.Empty;
+        private const int BufSize = 4*1024;
+
+        static void LocalMemoryFileTest(FileInfo fsNm, IPAddress targetAddress, string targetFsNm)
+        {
+            using var blockReader = new FileBlockReader(BufSize, fsNm);
+            using var dumper = new FileBlockDumper(targetFsNm,BufSize,fsNm.Length);
+            foreach (var (buf,count,index) in blockReader)
+            {
+                LogArray(buf, count,index);
+                dumper.WriteBlock(index, buf, count);
+            }
             Console.Out.WriteLine($"run: diff -s {targetFsNm} {fsNm}");
             using var diffProc = new Process
             {
@@ -59,18 +83,36 @@ namespace UdpFile
                 }
             };
             diffProc.Start();
-            await diffProc.WaitForExitAsync();
-
-            targetAddress = GetIpAddress("localhost");
-            Console.Out.WriteLine(targetAddress);
+            diffProc.WaitForExit();
         }
 
-        private static IPAddress GetIpAddress(string ip)
+        private static void LogArray(byte[] buf, int readCount, long index)
         {
-            if (ip.Equals("localhost"))
-                return IPAddress.Loopback;
-            return IPAddress.Parse(ip);
+            var lineCharNum = 8;
+            var start = index * BufSize;
+            var lineCharIndex = 0;
+            for (int i = 0; i < readCount; i++,++start)
+            {
+                if (lineCharIndex == 0)
+                {
+                    Console.Out.Write($"{start:x8}: ");
+                }
+                if (lineCharIndex < lineCharNum)
+                {
+                    Console.Out.Write($"{buf[i]:x2}");
+                    if (start % 2 == 1)
+                    {
+                        Console.Out.Write(' ');
+                    }
+                }
+
+                lineCharIndex++;
+                if (lineCharIndex == lineCharNum)
+                {
+                    lineCharIndex = 0;
+                    Console.Out.WriteLine();
+                }
+            }
         }
-        private static string GetArgs(string[] args, int i) => i < args.Length ? args[i] : string.Empty;
     }
 }

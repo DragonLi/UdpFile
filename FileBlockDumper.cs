@@ -23,7 +23,7 @@ namespace UdpFile
             _accessor = _mmf.CreateViewAccessor();
         }
 
-        public void WriteBlock(int blockIndex, byte[] buf, int count)
+        public void WriteBlock(long blockIndex, byte[] buf, int count)
         {
             _accessor.WriteArray(blockIndex * _blockSize, buf, 0, count);
         }
