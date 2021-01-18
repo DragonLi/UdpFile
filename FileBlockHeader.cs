@@ -1,6 +1,6 @@
 namespace UdpFile
 {
-    public class FileBlockHeader
+    public struct FileBlockHeader
     {
         
     }
