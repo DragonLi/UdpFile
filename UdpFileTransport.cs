@@ -1,10 +1,11 @@
 ﻿using System;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
 
 namespace UdpFile
 {
-    class Program
+    static class Program
     {
         static void Main(string[] args)
         {
@@ -40,12 +41,23 @@ namespace UdpFile
             }
 
             Console.Out.WriteLine($"{fsNm},{ip},{targetFsNm}");
-            
+            var watcher = Stopwatch.StartNew();
+            watcher.Start();
             UdpFileTransportController.Sent(new FileInfo(fsNm),targetAddress,targetFsNm);
-            
-            Console.Out.WriteLine("finished");
-            //diff -s /tmp/UdpFileTransport.dll /tmp/UdpFile/bin/Debug/net5.0/UdpFileTransport.dll
-            
+            watcher.Stop();
+            Console.Out.WriteLine($"finished with time: {watcher.Elapsed}");
+            Console.Out.WriteLine($"run: diff -s {targetFsNm} {fsNm}");
+            using var diffProc = new Process
+            {
+                StartInfo =
+                {
+                    UseShellExecute = false,
+                    Arguments = $"-s {targetFsNm} {fsNm}",
+                    FileName = "diff",
+                    CreateNoWindow = true
+                }
+            };
+            diffProc.Start();
         }
 
         private static string GetArgs(string[] args, int i) => i < args.Length ? args[i] : string.Empty;

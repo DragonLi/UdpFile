@@ -20,7 +20,7 @@ namespace UdpFile
             for (var i = 0; i < max; i++)
             {
                 var readCount = accessor.ReadArray(i*BufSize, MmfBuf, 0, MmfBuf.Length);
-                LogArray(MmfBuf, readCount,i);
+                // LogArray(MmfBuf, readCount,i);
                 dumper.WriteBlock(i, MmfBuf, readCount);
             }
         }
