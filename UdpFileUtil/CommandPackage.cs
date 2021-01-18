@@ -88,7 +88,6 @@ namespace UdpFile
     [StructLayout(LayoutKind.Sequential,Pack = 1)]
     public unsafe struct StopCommandInfo
     {
-
         public void ReadFrom(byte[] buf, int start)
         {
             fixed (void* t = &this)
@@ -112,12 +111,14 @@ namespace UdpFile
     public unsafe struct DataCommandInfo
     {
 
-        public void ReadFrom(byte[] buf, int start)
+        public int ReadFrom(byte[] buf, int start)
         {
+            var size = sizeof(DataCommandInfo);
             fixed (void* t = &this)
             {
-                BinSerializableHelper.ReadFrom(buf, start, t,sizeof(DataCommandInfo));
+                BinSerializableHelper.ReadFrom(buf, start, t,size);
             }
+            return size;
         }
 
         public void WriteTo(byte[] buf, int start)
@@ -135,11 +136,22 @@ namespace UdpFile
     public unsafe struct VerifyCommandInfo
     {
 
-        public void ReadFrom(byte[] buf, int start,out byte[] verificationList)
+        public void ReadFrom(byte[] buf, int start,out byte[] verificationList,in CommandPackage cmd)
         {
             fixed (void* t = &this)
             {
-                BinSerializableHelper.ReadFrom(buf, start, t,sizeof(VerifyCommandInfo));
+                var size = sizeof(VerifyCommandInfo);
+                BinSerializableHelper.ReadFrom(buf, start, t,size);
+                var len = cmd.HeaderLength - sizeof(CommandPackage) - size;
+                if (len <= 0)
+                {
+                    verificationList = Array.Empty<byte>();
+                }
+                else
+                {
+                    verificationList = new byte[len];
+                    Buffer.BlockCopy(buf, start + size, verificationList, 0, len);
+                }
             }
         }
 
