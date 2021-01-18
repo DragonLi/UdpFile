@@ -8,6 +8,7 @@ namespace UdpFile
 {
     public class UdpFileTransportController
     {
+        //TODO read from config
         private const int BufSize = 4*1024;
 
         public static async Task Sent(FileInfo srcFileInfo, IPEndPoint targetAddress, string targetFsNm)
