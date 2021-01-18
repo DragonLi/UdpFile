@@ -59,6 +59,7 @@ namespace UdpFile
                 }
             };
             diffProc.Start();
+            await diffProc.WaitForExitAsync();
 
             targetAddress = GetIpAddress("localhost");
             Console.Out.WriteLine(targetAddress);

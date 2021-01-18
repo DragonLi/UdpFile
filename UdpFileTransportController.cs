@@ -26,11 +26,13 @@ namespace UdpFile
 
             var udpClient = new UdpClient();
             IPEndPoint ep = new IPEndPoint(IPAddress.Loopback, 9999);
+            var sentCount = 0;
             foreach (var (buf,count,index) in blockReader)
             {
                 //LogArray(buf, count,index);
-                await udpClient.SendAsync(buf, count, ep);
+                sentCount += await udpClient.SendAsync(buf, count, ep);
             }
+            await Console.Out.WriteLineAsync($"sent count: {sentCount}");
         }
 
         private static void LogArray(byte[] buf, int readCount, long index)
