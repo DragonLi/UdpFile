@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Threading.Tasks;
 
 namespace UdpFile
 {
@@ -14,12 +15,12 @@ namespace UdpFile
 
     public static class UdpFileServer
     {
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
             ExtractParams(args, out var listenPort, out var filePrefix);
 
             var listener = new UdpClient(listenPort);
-            var group = new IPEndPoint(IPAddress.Loopback, listenPort);
+            var filter = new IPEndPoint(IPAddress.Any, listenPort);
 
             var state = ReceiverState.Listening;
             var cmd = new CommandPackage();
@@ -28,12 +29,43 @@ namespace UdpFile
             FileBlockDumper? writer = null;
             string targetFileName = string.Empty;
             var dataPack = new DataCommandInfo();
+            const int maxTimeoutCount = 3;
+            const int timeoutInterval = 3 * 1000;
+            var timeoutCount = 0;
             Logger.Debug($"start udp server, port: {listenPort}, store location: {filePrefix}");
             try
             {
+                // listener.Connect(filter);
                 while (state != ReceiverState.Stop)
                 {
-                    var bytes = listener.Receive(ref group);
+                    var receiver = listener.ReceiveAsync();
+                    var timeOutSignal = -1;
+                    if (state != ReceiverState.Listening)
+                    {
+                        while (timeOutSignal ==-1 && timeoutCount < maxTimeoutCount)
+                        {
+                            timeOutSignal = Task.WaitAny(new Task[]{receiver}, timeoutInterval);
+                            if (timeOutSignal < 0)
+                            {
+                                timeoutCount++;
+                            }
+                        }
+
+                        if (timeOutSignal >= 0)
+                        {
+                            timeoutCount = 0;
+                        }
+                        else
+                        {
+                            Logger.Err($"timeout, max count: {maxTimeoutCount}, timeout interval: {timeoutInterval}, received: {fileReceiveCount}");
+                            writer?.Dispose();
+                            writer = null;
+                            break;
+                        }
+                    }
+                    var udpResult = await receiver;
+                    // Logger.Debug($"received from: {udpResult.RemoteEndPoint}");
+                    var bytes = udpResult.Buffer;
                     if (bytes.Length <= 0)
                     {
                         Logger.Debug("invalid package length");
@@ -151,10 +183,17 @@ namespace UdpFile
                             }
                             case CommandEnum.Stop:
                             {
-                                Logger.Debug($"stop {targetFileName},received: {fileReceiveCount}");
-                                state = ReceiverState.Stop;
-                                writer?.Dispose();
-                                writer = null;
+                                if (fileReceiveCount < startCmd.TargetFileSize)
+                                {
+                                    Logger.Debug("stopping, waiting all packages");
+                                }
+                                else
+                                {
+                                    Logger.Debug($"stop {targetFileName},received: {fileReceiveCount}");
+                                    state = ReceiverState.Stop;
+                                    writer?.Dispose();
+                                    writer = null;
+                                }
                                 var stopInfo = new StopCommandInfo();
                                 stopInfo.ReadFrom(bytes, offset);
                                 break;
