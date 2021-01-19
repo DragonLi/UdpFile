@@ -2,16 +2,16 @@ namespace UdpFile
 {
     public static unsafe class PackageBuilder
     {
-        private static readonly byte[] StartPackBuf = new byte[sizeof(CommandPackage) + sizeof(StartCommandInfo)];
-        private static readonly byte[] StopPackBuf = new byte[sizeof(CommandPackage) + sizeof(StopCommandInfo)];
-        private static readonly int DataHeadSize = sizeof(DataCommandInfo);
+        private static readonly int DataHeadSize = sizeof(CommandPackage) + sizeof(DataCommandInfo);
         public static (byte[], int) PrepareStartPack(ref CommandPackage cmd,ref StartCommandInfo info,string targetFileName)
         {
+            var size = sizeof(CommandPackage) + sizeof(StartCommandInfo) + 4 * targetFileName.Length;
+            var startPackBuf = new byte[size];
             cmd.SeqId = TransportSeqFactory.NextId();
             cmd.Cmd = CommandEnum.Start;
-            var offset = cmd.WriteTo(StartPackBuf, 0);
-            info.WriteTo(StartPackBuf, offset, targetFileName);
-            return (StartPackBuf, StartPackBuf.Length);
+            var offset = cmd.WriteTo(startPackBuf, 0);
+            offset += info.WriteTo(startPackBuf, offset, targetFileName);
+            return (startPackBuf, offset);
         }
 
         public static (byte[], int) PrepareDataPack(ref CommandPackage cmd,ref DataCommandInfo info,FileBlockReader blockReader)
@@ -21,16 +21,17 @@ namespace UdpFile
             var buf = blockReader.UnsafeRead(info.BlockIndex, out var count);
             var offset = cmd.WriteTo(buf, 0);
             info.WriteTo(buf, offset);
-            return (buf, count + offset + DataHeadSize);
+            return (buf, count + DataHeadSize);
         }
 
         public static (byte[],int) PrepareStopPack(ref CommandPackage cmd, ref StopCommandInfo info)
         {
             cmd.SeqId = TransportSeqFactory.NextId();
             cmd.Cmd = CommandEnum.Stop;
-            var offset = cmd.WriteTo(StopPackBuf, 0);
-            info.WriteTo(StopPackBuf, offset);
-            return (StopPackBuf, StopPackBuf.Length);
+            var stopPackBuf = new byte[sizeof(CommandPackage) + sizeof(StopCommandInfo)];
+            var offset = cmd.WriteTo(stopPackBuf, 0);
+            info.WriteTo(stopPackBuf, offset);
+            return (stopPackBuf, stopPackBuf.Length);
         }
     }
 }

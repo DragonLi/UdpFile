@@ -14,6 +14,14 @@ namespace UdpFile
         AckList,
     }
 
+    public enum OverrideModeEnum : byte
+    {
+        NewOrFail,
+        Resume,
+        Rename,
+        Override,
+    }
+
     public static class BinSerializableHelper
     {
         public static unsafe void WriteTo(byte[] buf, int start,void* input, int size)
@@ -37,6 +45,10 @@ namespace UdpFile
         public int ReadFrom(byte[] buf, int start)
         {
             var size = sizeof(CommandPackage);
+            if (size + start >= buf.Length)
+            {
+                return 0;
+            }
             fixed (void* t = &this)
             {
                 BinSerializableHelper.ReadFrom(buf, start, t,size);
@@ -62,15 +74,21 @@ namespace UdpFile
     {
         public string ReadFrom(byte[] buf, int start)
         {
+            var size = sizeof(StartCommandInfo);
+            if (size + start >= buf.Length)
+            {
+                TargetFileSize = 0;
+                BlockSize = TargetFileNameLength = 0;
+                return string.Empty;
+            }
             fixed (void* t = &this)
             {
-                var size = sizeof(StartCommandInfo);
                 BinSerializableHelper.ReadFrom(buf, start, t, size);
                 return TargetFileNameLength <= 0 ? string.Empty : Encoding.UTF8.GetString(buf, start + size, TargetFileNameLength);
             }
         }
 
-        public void WriteTo(byte[] buf, int start, string targetFileName)
+        public int WriteTo(byte[] buf, int start, string targetFileName)
         {
             fixed (void* t = &this)
             {
@@ -78,11 +96,14 @@ namespace UdpFile
                 TargetFileNameLength =
                     Encoding.UTF8.GetBytes(targetFileName, 0, targetFileName.Length, buf, start + size);
                 BinSerializableHelper.WriteTo(buf, start, t,size);
+                return size + TargetFileNameLength;
             }
         }
 
         public long TargetFileSize;
         public int BlockSize;
+        public byte Version;
+        public OverrideModeEnum OverriteMode;
         public int TargetFileNameLength;
         //can not add directly as a member: string TargetFileName;
     }
@@ -92,9 +113,14 @@ namespace UdpFile
     {
         public void ReadFrom(byte[] buf, int start)
         {
+            var size = sizeof(StopCommandInfo);
+            if (size + start >= buf.Length)
+            {
+                return;
+            }
             fixed (void* t = &this)
             {
-                BinSerializableHelper.ReadFrom(buf, start, t,sizeof(StopCommandInfo));
+                BinSerializableHelper.ReadFrom(buf, start, t,size);
             }
         }
 
@@ -116,9 +142,11 @@ namespace UdpFile
         public int ReadFrom(byte[] buf, int start)
         {
             var size = sizeof(DataCommandInfo);
+            if (size + start >= buf.Length)
+                return 0;
             fixed (void* t = &this)
             {
-                BinSerializableHelper.ReadFrom(buf, start, t,size);
+                BinSerializableHelper.ReadFrom(buf, start, t, size);
             }
             return size;
         }
@@ -137,7 +165,6 @@ namespace UdpFile
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     public unsafe struct VerifyCommandInfo
     {
-
         public byte[] ReadFrom(byte[] buf, int start)
         {
             fixed (void* t = &this)

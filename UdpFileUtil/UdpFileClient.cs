@@ -18,7 +18,11 @@ namespace UdpFile
             var sentCount = 0;
             var cmd = new CommandPackage();
             {
-                var startInfo = new StartCommandInfo {BlockSize = BufSize, TargetFileSize = srcFileInfo.Length};
+                var startInfo = new StartCommandInfo
+                {
+                    BlockSize = BufSize, TargetFileSize = srcFileInfo.Length,
+                    Version = 1,OverriteMode = OverrideModeEnum.NewOrFail
+                };
                 var (buf, count) = PackageBuilder.PrepareStartPack(ref cmd, ref startInfo, targetFsNm);
                 await udpClient.SendAsync(buf, count, targetAddress);
             }

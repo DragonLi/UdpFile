@@ -5,12 +5,13 @@ using System.Net.Sockets;
 
 namespace UdpFile
 {
-    public enum ReceiverState{
+    public enum ReceiverState
+    {
         Listening,
         Receiving,
         Stop,
     }
-    
+
     public static class UdpFileServer
     {
         static void Main(string[] args)
@@ -18,12 +19,12 @@ namespace UdpFile
             var listenPort = 9999;
             var listener = new UdpClient(listenPort);
             var group = new IPEndPoint(IPAddress.Loopback, listenPort);
-            
+
             var state = ReceiverState.Listening;
             var cmd = new CommandPackage();
             var startCmd = new StartCommandInfo();
             FileBlockDumper? writer = null;
-            string targetFileName = String.Empty;
+            string targetFileName = string.Empty;
             var dataPack = new DataCommandInfo();
             try
             {
@@ -32,63 +33,92 @@ namespace UdpFile
                     var bytes = listener.Receive(ref group);
                     if (bytes.Length <= 0)
                     {
-                        continue;
+                        Logger.Debug("invalid package length");
+                        break;
                     }
-                    var offset = cmd.ReadFrom(bytes, 0);
-                    switch (cmd.Cmd)
+
+                    try
                     {
-                        case CommandEnum.Start:
+                        var offset = cmd.ReadFrom(bytes, 0);
+                        if (offset <= 0)
                         {
-                            targetFileName = startCmd.ReadFrom(bytes, offset);
-                            if (startCmd.BlockSize <= 0)
-                            {
-                                continue;
-                            }
-                            if (startCmd.TargetFileSize <= 0)
-                            {
-                                continue;
-                            }
-                            if (targetFileName.Length <= 0)
-                            {
-                                continue;
-                            }
-                            var targetFsNm = Path.GetFullPath(targetFileName);
-                            if (Path.EndsInDirectorySeparator(targetFsNm))
-                            {
-                                continue;
-                            }
-                            writer = new FileBlockDumper(targetFsNm,startCmd.BlockSize,startCmd.TargetFileSize);
-                            state = ReceiverState.Receiving;
-                            break;
+                            Logger.Debug("package format error");
+                            continue;
                         }
-                        case CommandEnum.Data:
+                        switch (cmd.Cmd)
                         {
-                            if (writer == null)
+                            case CommandEnum.Start:
                             {
-                                continue;
+                                targetFileName = startCmd.ReadFrom(bytes, offset);
+                                if (startCmd.BlockSize <= 0)
+                                {
+                                    Logger.Debug("invalid BlockSize");
+                                    continue;
+                                }
+
+                                if (startCmd.TargetFileSize <= 0)
+                                {
+                                    Logger.Debug("invalid TargetFileSize");
+                                    continue;
+                                }
+
+                                if (targetFileName.Length <= 0)
+                                {
+                                    Logger.Debug("invalid targetFileName");
+                                    continue;
+                                }
+
+                                var targetFsNm = Path.GetFullPath(targetFileName);
+                                if (Path.EndsInDirectorySeparator(targetFsNm))
+                                {
+                                    Logger.Debug("targetFileName is not a valid file path");
+                                    continue;
+                                }
+
+                                writer = new FileBlockDumper(targetFsNm, startCmd.BlockSize, startCmd.TargetFileSize);
+                                state = ReceiverState.Receiving;
+                                Logger.Debug($"start transporting: {targetFileName}");
+                                break;
                             }
-                            if (startCmd.BlockSize <= 0)
+                            case CommandEnum.Data:
                             {
-                                continue;
+                                if (writer == null)
+                                {
+                                    Logger.Debug("incorrect sequence: data package before start command");
+                                    continue;
+                                }
+
+                                if (startCmd.BlockSize <= 0)
+                                {
+                                    Logger.Debug("invalid BlockSize");
+                                    continue;
+                                }
+
+                                offset += dataPack.ReadFrom(bytes, offset);
+                                writer.WriteBlock(dataPack.BlockIndex, bytes, bytes.Length - offset, offset);
+                                break;
                             }
-                            offset += dataPack.ReadFrom(bytes,offset);
-                            writer.WriteBlock(dataPack.BlockIndex, bytes, bytes.Length - offset);
-                            break;
+                            case CommandEnum.Stop:
+                            {
+                                Logger.Debug($"stop {targetFileName}");
+                                state = ReceiverState.Stop;
+                                writer?.Dispose();
+                                writer = null;
+                                var stopInfo = new StopCommandInfo();
+                                stopInfo.ReadFrom(bytes, offset);
+                                break;
+                            }
                         }
-                        case CommandEnum.Stop:
-                        {
-                            writer?.Dispose();
-                            writer = null;
-                            var stopInfo = new StopCommandInfo();
-                            stopInfo.ReadFrom(bytes, offset);
-                            break;
-                        }
+                    }
+                    catch (Exception e)
+                    {
+                        Logger.Err(e);
                     }
                 }
             }
             catch (SocketException e)
             {
-                Console.WriteLine(e);
+                Logger.Err(e);
             }
             finally
             {
