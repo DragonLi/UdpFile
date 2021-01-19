@@ -27,7 +27,6 @@ namespace UdpFile
             var targetFsNm = GetArgs(args,2);
             try
             {
-                targetFsNm = Path.GetFullPath(targetFsNm);
                 if (Path.EndsInDirectorySeparator(targetFsNm))
                 {
                     Console.Out.WriteLine($"target file name must not be a directory: {GetArgs(args,2)}");
