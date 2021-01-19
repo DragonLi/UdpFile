@@ -1,7 +1,7 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="UdpClient (Larget)" type="DotNetProject" factoryName=".NET Project">
     <option name="EXE_PATH" value="$PROJECT_DIR$/UdpClient/bin/Debug/net5.0/UdpClient.dll" />
-    <option name="PROGRAM_PARAMETERS" value="$PROJECT_DIR$/../wps-office_11.1.0.10161_amd64.deb 127.0.0.1:9999 $PROJECT_DIR$/../test.deb" />
+    <option name="PROGRAM_PARAMETERS" value="$PROJECT_DIR$/../dotnet-sdk-5.0.102-linux-x64.tar.gz 127.0.0.1:9999 tmp/dotnet-sdk-5.0.102-linux-x64.tar.gz" />
     <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/UdpClient/bin/Debug/net5.0" />
     <option name="PASS_PARENT_ENVS" value="1" />
     <option name="USE_EXTERNAL_CONSOLE" value="0" />

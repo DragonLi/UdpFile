@@ -6,25 +6,30 @@ using System.Threading.Tasks;
 
 namespace UdpFile
 {
+    public class UdpTransportClientConfig
+    {
+        public FileInfo srcFileInfo;
+        public IPEndPoint targetAddress;
+        public string targetFileName;
+        public int blockSize;
+        public OverrideModeEnum mode;
+    }
     public class UdpFileClient
     {
-        //TODO read from config
-        private const int BufSize = 4*1024;
-
-        public static async Task Sent(FileInfo srcFileInfo, IPEndPoint targetAddress, string targetFsNm)
+        public static async Task Sent(UdpTransportClientConfig cfg)
         {
-            using var blockReader = new FileBlockReader(BufSize, srcFileInfo);
+            using var blockReader = new FileBlockReader(cfg.blockSize, cfg.srcFileInfo);
             var udpClient = new UdpClient();
             var sentCount = 0;
             var cmd = new CommandPackage();
             {
                 var startInfo = new StartCommandInfo
                 {
-                    BlockSize = BufSize, TargetFileSize = srcFileInfo.Length,
-                    Version = 1,OverriteMode = OverrideModeEnum.NewOrFail
+                    BlockSize = cfg.blockSize, TargetFileSize = cfg.srcFileInfo.Length,
+                    Version = 1,OverriteMode = cfg.mode
                 };
-                var (buf, count) = PackageBuilder.PrepareStartPack(ref cmd, ref startInfo, targetFsNm);
-                await udpClient.SendAsync(buf, count, targetAddress);
+                var (buf, count) = PackageBuilder.PrepareStartPack(ref cmd, ref startInfo, cfg.targetFileName);
+                await udpClient.SendAsync(buf, count, cfg.targetAddress);
             }
             
             var dataInfo = new DataCommandInfo();
@@ -32,13 +37,13 @@ namespace UdpFile
             {
                 dataInfo.BlockIndex = i;
                 var (buf, count) = PackageBuilder.PrepareDataPack(ref cmd, ref dataInfo, blockReader);
-                sentCount += await udpClient.SendAsync(buf, count, targetAddress);
+                sentCount += await udpClient.SendAsync(buf, count, cfg.targetAddress);
             }
 
             {
                 var stopInfo = new StopCommandInfo();
                 var (buf, count) = PackageBuilder.PrepareStopPack(ref cmd, ref stopInfo);
-                await udpClient.SendAsync(buf, count, targetAddress);
+                await udpClient.SendAsync(buf, count, cfg.targetAddress);
             }
             await Console.Out.WriteLineAsync($"sent count: {sentCount}");
         }

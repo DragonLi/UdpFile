@@ -1,0 +1,6 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Publish UdpServer to folder" type="DotNetFolderPublish" factoryName="Publish to folder">
+    <riderPublish runtime="linux-x64" self_contained="true" target_folder="$PROJECT_DIR$/../UdpServerPublish" target_framework="net5.0" uuid_high="-9065990763115493363" uuid_low="-8979383382950369009" />
+    <method v="2" />
+  </configuration>
+</component>

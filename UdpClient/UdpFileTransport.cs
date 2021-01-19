@@ -40,14 +40,26 @@ namespace UdpFile
                 return;
             }
 
-            Console.Out.WriteLine($"{fsNm},{ip},{targetFsNm}");
+            var blockSizeInK = GetArgs(args, 3);
+            if (!int.TryParse(blockSizeInK, out var blockSize))
+            {
+                blockSize = 16;
+            }
+
+            Console.Out.WriteLine($"{fsNm},{ip},{targetFsNm},{blockSize}");
             var srcFileInfo = new FileInfo(fsNm);
+            var cfg = new UdpTransportClientConfig()
+            {
+                blockSize = blockSize*1024, srcFileInfo = srcFileInfo,
+                targetAddress = targetAddress, targetFileName = targetFsNm,
+                mode = OverrideModeEnum.Override
+            };
             #if TestLocal
             LocalMemoryFileTest(srcFileInfo, targetAddress, targetFsNm);
             #endif
             var watcher = Stopwatch.StartNew();
             watcher.Start();
-            await UdpFileClient.Sent(srcFileInfo,targetAddress,targetFsNm);
+            await UdpFileClient.Sent(cfg);
             watcher.Stop();
             Console.Out.WriteLine($"finished with time: {watcher.Elapsed}");
         }
