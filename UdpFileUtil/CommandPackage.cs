@@ -44,11 +44,13 @@ namespace UdpFile
             return size;
         }
 
-        public void WriteTo(byte[] buf, int start)
+        public int WriteTo(byte[] buf, int start)
         {
             fixed (void* t = &this)
             {
-                BinSerializableHelper.WriteTo(buf, start, t,sizeof(CommandPackage));
+                var size = sizeof(CommandPackage);
+                BinSerializableHelper.WriteTo(buf, start, t,size);
+                return size;
             }
         }
         public int SeqId;

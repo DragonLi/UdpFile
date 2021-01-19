@@ -15,7 +15,6 @@ namespace UdpFile
         private readonly FileInfo _srcFile;
         private readonly long _max;
         private readonly int _headerSize;
-        private readonly int _cmdSize;
 
         public FileBlockReader(int blockSize, FileInfo srcFile)
         {
@@ -25,8 +24,7 @@ namespace UdpFile
             _accessor = _mmf.CreateViewAccessor();
             unsafe
             {
-                _cmdSize = sizeof(CommandPackage);
-                _headerSize = _cmdSize + sizeof(DataCommandInfo);
+                _headerSize = sizeof(CommandPackage) + sizeof(DataCommandInfo);
             }
             _buf = new byte[_headerSize+blockSize];
             var total = srcFile.Length;
@@ -35,16 +33,6 @@ namespace UdpFile
         }
 
         public long MaxBlockIndex => _max;
-
-        public (byte[], int) QuickPrepare(ref CommandPackage cmd, ref DataCommandInfo info)
-        {
-            var blockIndex = info.BlockIndex;
-            var readCount = _accessor.ReadArray(blockIndex * _blockSize, _buf, _headerSize, _blockSize);
-            cmd.Cmd = CommandEnum.Data;
-            cmd.WriteTo(_buf, 0);
-            info.WriteTo(_buf, _cmdSize);
-            return (_buf, readCount + _headerSize);
-        }
 
         public (byte[], int) Read(long blockIndex)
         {

@@ -17,15 +17,24 @@ namespace UdpFile
             var udpClient = new UdpClient();
             var sentCount = 0;
             var cmd = new CommandPackage();
-            cmd.SeqId = TransportSeqFactory.NextId();
-            udpClient.SendAsync()
-            var info = new DataCommandInfo();
+            {
+                var startInfo = new StartCommandInfo {BlockSize = BufSize, TargetFileSize = srcFileInfo.Length};
+                var (buf, count) = PackageBuilder.PrepareStartPack(ref cmd, ref startInfo, targetFsNm);
+                await udpClient.SendAsync(buf, count, targetAddress);
+            }
+            
+            var dataInfo = new DataCommandInfo();
             for (long i = 0; i < blockReader.MaxBlockIndex; i++)
             {
-                cmd.SeqId = TransportSeqFactory.NextId();
-                info.BlockIndex = i;
-                var (buf, count) = blockReader.QuickPrepare(ref cmd, ref info);
+                dataInfo.BlockIndex = i;
+                var (buf, count) = PackageBuilder.PrepareDataPack(ref cmd, ref dataInfo, blockReader);
                 sentCount += await udpClient.SendAsync(buf, count, targetAddress);
+            }
+
+            {
+                var stopInfo = new StopCommandInfo();
+                var (buf, count) = PackageBuilder.PrepareStopPack(ref cmd, ref stopInfo);
+                await udpClient.SendAsync(buf, count, targetAddress);
             }
             await Console.Out.WriteLineAsync($"sent count: {sentCount}");
         }
