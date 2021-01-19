@@ -43,7 +43,7 @@ namespace UdpFile
             var blockSizeInK = GetArgs(args, 3);
             if (!int.TryParse(blockSizeInK, out var blockSize))
             {
-                blockSize = 16;
+                blockSize = 4;
             }
 
             Console.Out.WriteLine($"{fsNm},{ip},{targetFsNm},{blockSize}");

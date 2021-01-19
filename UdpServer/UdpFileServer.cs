@@ -24,6 +24,7 @@ namespace UdpFile
             var state = ReceiverState.Listening;
             var cmd = new CommandPackage();
             var startCmd = new StartCommandInfo();
+            long fileReceiveCount = 0;
             FileBlockDumper? writer = null;
             string targetFileName = string.Empty;
             var dataPack = new DataCommandInfo();
@@ -108,7 +109,15 @@ namespace UdpFile
                                         continue;
                                     }
                                     case OverrideModeEnum.Override:
+                                    {
+                                        if (File.Exists(targetFsNm) && Directory.Exists(targetFsNm))
+                                        {
+                                            Logger.Err($"target file is already exist as a directory: {targetFsNm}");
+                                            continue;
+                                        }
+                                        Directory.CreateDirectory(Path.GetDirectoryName(targetFsNm));
                                         break;
+                                    }
                                     default:
                                     {
                                         Logger.Debug($"invalid override mode: {startCmd.OverriteMode}");
@@ -137,11 +146,12 @@ namespace UdpFile
 
                                 offset += dataPack.ReadFrom(bytes, offset);
                                 writer.WriteBlock(dataPack.BlockIndex, bytes, bytes.Length - offset, offset);
+                                fileReceiveCount += bytes.Length - offset;
                                 break;
                             }
                             case CommandEnum.Stop:
                             {
-                                Logger.Debug($"stop {targetFileName}");
+                                Logger.Debug($"stop {targetFileName},received: {fileReceiveCount}");
                                 state = ReceiverState.Stop;
                                 writer?.Dispose();
                                 writer = null;
