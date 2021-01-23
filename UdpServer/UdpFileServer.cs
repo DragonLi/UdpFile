@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
@@ -32,6 +33,8 @@ namespace UdpFile
             const int maxTimeoutCount = 3;
             const int timeoutInterval = 3 * 1000;
             var timeoutCount = 0;
+            var seqIdTime = new Dictionary<int, DateTime>();
+            var tenMinutes = new TimeSpan(0, 10, 0);
             Logger.Debug($"start udp server, port: {listenPort}, store location: {filePrefix}");
             try
             {
@@ -84,6 +87,11 @@ namespace UdpFile
                         {
                             case CommandEnum.Start:
                             {
+                                if (writer != null)
+                                {
+                                    Logger.Info("file transport is already started");
+                                    continue;
+                                }
                                 targetFileName = startCmd.ReadFrom(bytes, offset);
                                 if (startCmd.BlockSize <= 0)
                                 {
@@ -121,6 +129,17 @@ namespace UdpFile
                                     continue;
                                 }
 
+                                var now = DateTime.Now;
+                                if (seqIdTime.TryGetValue(cmd.SeqId, out var expiredTime) && now < expiredTime)
+                                {
+                                    Logger.Debug("duplicate command received");
+                                    continue;
+                                }
+                                else
+                                {
+                                    seqIdTime[cmd.SeqId] = now + tenMinutes;
+                                }
+
                                 switch (startCmd.OverriteMode)
                                 {
                                     case OverrideModeEnum.NewOrFail:
@@ -144,7 +163,7 @@ namespace UdpFile
                                     {
                                         if (File.Exists(targetFsNm) && Directory.Exists(targetFsNm))
                                         {
-                                            Logger.Err($"target file is already exist as a directory: {targetFsNm}");
+                                            Logger.Err($"target file is already a directory: {targetFsNm}");
                                             continue;
                                         }
                                         Directory.CreateDirectory(Path.GetDirectoryName(targetFsNm));
@@ -183,6 +202,11 @@ namespace UdpFile
                             }
                             case CommandEnum.Stop:
                             {
+                                if (writer == null)
+                                {
+                                    Logger.Debug("incorrect sequence: file transport not started");
+                                    continue;
+                                }
                                 if (fileReceiveCount < startCmd.TargetFileSize)
                                 {
                                     Logger.Debug("stopping, waiting all packages");

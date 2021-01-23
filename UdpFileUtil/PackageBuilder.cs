@@ -16,7 +16,7 @@ namespace UdpFile
 
         public static (byte[], int) PrepareDataPack(ref CommandPackage cmd,ref DataCommandInfo info,FileBlockReader blockReader)
         {
-            cmd.SeqId = TransportSeqFactory.NextId();
+            cmd.SeqId = 0;
             cmd.Cmd = CommandEnum.Data;
             var buf = blockReader.UnsafeRead(info.BlockIndex, out var count);
             var offset = cmd.WriteTo(buf, 0);

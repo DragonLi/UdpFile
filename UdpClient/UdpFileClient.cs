@@ -16,6 +16,12 @@ namespace UdpFile
     }
     public class UdpFileClient
     {
+        static async Task EnsureCmdSent(UdpClient udpClient, byte[] buf, int count, IPEndPoint target)
+        {
+            await udpClient.SendAsync(buf, count, target);
+            await udpClient.SendAsync(buf, count, target);
+        }
+        
         public static async Task Sent(UdpTransportClientConfig cfg)
         {
             using var blockReader = new FileBlockReader(cfg.blockSize, cfg.srcFileInfo);
@@ -29,7 +35,7 @@ namespace UdpFile
                     Version = 1,OverriteMode = cfg.mode
                 };
                 var (buf, count) = PackageBuilder.PrepareStartPack(ref cmd, ref startInfo, cfg.targetFileName);
-                await udpClient.SendAsync(buf, count, cfg.targetAddress);
+                await EnsureCmdSent(udpClient, buf, count, cfg.targetAddress);
             }
             
             var dataInfo = new DataCommandInfo();
@@ -43,7 +49,7 @@ namespace UdpFile
             {
                 var stopInfo = new StopCommandInfo();
                 var (buf, count) = PackageBuilder.PrepareStopPack(ref cmd, ref stopInfo);
-                await udpClient.SendAsync(buf, count, cfg.targetAddress);
+                await EnsureCmdSent(udpClient, buf, count, cfg.targetAddress);
             }
             await Console.Out.WriteLineAsync($"sent count: {sentCount}");
         }

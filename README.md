@@ -1,1 +1,13 @@
 UdpFile
+使用UDP协议传输大文件的设计方案
+
+TODO
+数据包SeqID不用
+过滤SeqID相同的包
+减少switch
+连发并等待回复
+rename命令
+neworfail命令
+resume命令
+重发校验失败的分块
+发送错误数据包的IP进行记录，超过一定次数就封禁

@@ -46,13 +46,21 @@ namespace UdpFile
                 blockSize = 4;
             }
 
-            Console.Out.WriteLine($"{fsNm},{ip},{targetFsNm},{blockSize}");
+            var modeStr = GetArgs(args, 4);
+            if (!int.TryParse(modeStr,out var modeInt))
+            {
+                modeInt = 0;
+            }
+
+            var mode = EnumHelper.FromInt(modeInt);
+
+            Console.Out.WriteLine($"{fsNm},{ip},{targetFsNm},{blockSize},{mode}");
             var srcFileInfo = new FileInfo(fsNm);
             var cfg = new UdpTransportClientConfig()
             {
                 blockSize = blockSize*1024, srcFileInfo = srcFileInfo,
                 targetAddress = targetAddress, targetFileName = targetFsNm,
-                mode = OverrideModeEnum.Override
+                mode = mode
             };
             #if TestLocal
             LocalMemoryFileTest(srcFileInfo, targetAddress, targetFsNm);

@@ -22,6 +22,14 @@ namespace UdpFile
         Override,
     }
 
+    public static class EnumHelper
+    {
+        public static OverrideModeEnum FromInt(int modeInt)
+        {
+            return (OverrideModeEnum) modeInt;
+        }
+    }
+
     public static class BinSerializableHelper
     {
         public static unsafe void WriteTo(byte[] buf, int start,void* input, int size)
