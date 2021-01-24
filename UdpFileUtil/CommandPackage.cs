@@ -146,24 +146,23 @@ namespace UdpFile
     [StructLayout(LayoutKind.Sequential,Pack = 1)]
     public unsafe struct DataCommandInfo
     {
-
+        private static readonly int _size = sizeof(DataCommandInfo);
         public int ReadFrom(byte[] buf, int start)
         {
-            var size = sizeof(DataCommandInfo);
-            if (size + start >= buf.Length)
+            if (_size + start >= buf.Length)
                 return 0;
             fixed (void* t = &this)
             {
-                BinSerializableHelper.ReadFrom(buf, start, t, size);
+                BinSerializableHelper.ReadFrom(buf, start, t, _size);
             }
-            return size;
+            return _size;
         }
 
         public void WriteTo(byte[] buf, int start)
         {
             fixed (void* t = &this)
             {
-                BinSerializableHelper.WriteTo(buf, start, t,sizeof(DataCommandInfo));
+                BinSerializableHelper.WriteTo(buf, start, t, _size);
             }
         }
 
@@ -173,12 +172,12 @@ namespace UdpFile
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     public unsafe struct VerifyCommandInfo
     {
+        private static readonly int _size = sizeof(VerifyCommandInfo);
         public byte[] ReadFrom(byte[] buf, int start)
         {
             fixed (void* t = &this)
             {
-                var size = sizeof(VerifyCommandInfo);
-                BinSerializableHelper.ReadFrom(buf, start, t,size);
+                BinSerializableHelper.ReadFrom(buf, start, t, _size);
                 if (Length <= 0)
                 {
                     return Array.Empty<byte>();
@@ -186,24 +185,22 @@ namespace UdpFile
                 else
                 {
                     var verificationList = new byte[Length];
-                    Buffer.BlockCopy(buf, start + size, verificationList, 0, Length);
+                    Buffer.BlockCopy(buf, start + _size, verificationList, 0, Length);
                     return verificationList;
                 }
             }
         }
-
         public void WriteTo(byte[] buf, int start,byte[] verificationList)
         {
             fixed (void* t = &this)
             {
                 Length = verificationList.Length;
-                var size = sizeof(VerifyCommandInfo);
-                BinSerializableHelper.WriteTo(buf, start, t,size);
-                Buffer.BlockCopy(verificationList, 0, buf, start + size, Length);
+                BinSerializableHelper.WriteTo(buf, start, t, _size);
+                Buffer.BlockCopy(verificationList, 0, buf, start + _size, Length);
             }
         }
 
-        public byte Number;
+        public long BlockIndex;
         public int Length;
         //can not add directly as a member: byte[] VerificationList;
     }

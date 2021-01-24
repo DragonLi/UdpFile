@@ -30,6 +30,7 @@ namespace UdpFile
             FileBlockDumper? writer = null;
             string targetFileName = string.Empty;
             var dataPack = new DataCommandInfo();
+            var vPack = new VerifyCommandInfo();
             const int maxTimeoutCount = 3;
             const int timeoutInterval = 3 * 1000;
             var timeoutCount = 0;
@@ -129,6 +130,7 @@ namespace UdpFile
                                     continue;
                                 }
 
+                                //TODO refactor: extract as function
                                 var now = DateTime.Now;
                                 if (seqIdTime.TryGetValue(cmd.SeqId, out var expiredTime) && now < expiredTime)
                                 {
@@ -183,7 +185,7 @@ namespace UdpFile
                             }
                             case CommandEnum.Data:
                             {
-                                if (writer == null)
+                                if (state != ReceiverState.Receiving)
                                 {
                                     Logger.Debug("incorrect sequence: data package before start command");
                                     continue;
@@ -200,9 +202,32 @@ namespace UdpFile
                                 fileReceiveCount += bytes.Length - offset;
                                 break;
                             }
+                            case CommandEnum.Verify:
+                            {
+                                if (state != ReceiverState.Receiving)
+                                {
+                                    Logger.Debug("incorrect sequence: file transport not started");
+                                    continue;
+                                }
+                                //TODO refactor: extract as function
+                                var now = DateTime.Now;
+                                if (seqIdTime.TryGetValue(cmd.SeqId, out var expiredTime) && now < expiredTime)
+                                {
+                                    Logger.Debug("duplicate command received");
+                                    continue;
+                                }
+                                else
+                                {
+                                    seqIdTime[cmd.SeqId] = now + tenMinutes;
+                                }
+
+                                var vBuf = vPack.ReadFrom(bytes, offset);
+                                VerifyAsync(writer, vBuf, vPack.BlockIndex);
+                                break;
+                            }
                             case CommandEnum.Stop:
                             {
-                                if (writer == null)
+                                if (state != ReceiverState.Receiving)
                                 {
                                     Logger.Debug("incorrect sequence: file transport not started");
                                     continue;
@@ -238,6 +263,16 @@ namespace UdpFile
             {
                 listener.Close();
             }
+        }
+
+        private static async Task VerifyAsync(FileBlockDumper writer, byte[] vBuf, long blockIndex)
+        {
+            var isOk = writer.Verify(blockIndex, vBuf);
+            if (!isOk)
+            {
+                Logger.Debug($"{blockIndex} not verify");
+            }
+            //TODO
         }
 
         private static void ExtractParams(string[] args, out int listenPort, out string filePrefix)

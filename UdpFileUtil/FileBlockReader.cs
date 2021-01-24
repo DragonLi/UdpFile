@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.MemoryMappedFiles;
+using System.Security.Cryptography;
 
 namespace UdpFile
 {
@@ -15,13 +16,19 @@ namespace UdpFile
         private readonly FileInfo _srcFile;
         private readonly long _max;
         private readonly int _headerSize;
+        private readonly MemoryMappedViewAccessor _hashReader;
+        private readonly byte[] _hashBuf;
+        private readonly SHA512Managed _hasher;
 
         public FileBlockReader(int blockSize, FileInfo srcFile)
         {
             _blockSize = blockSize;
             _srcFile = srcFile;
+            _hasher = new SHA512Managed();
             _mmf = MemoryMappedFile.CreateFromFile(srcFile.FullName);
             _accessor = _mmf.CreateViewAccessor();
+            _hashReader = _mmf.CreateViewAccessor();
+            _hashBuf = new byte[blockSize];
             unsafe
             {
                 _headerSize = sizeof(CommandPackage) + sizeof(DataCommandInfo);
@@ -33,6 +40,14 @@ namespace UdpFile
         }
 
         public long MaxBlockIndex => _max;
+
+        public int HasherLen => _hasher.HashSize / 8;
+
+        public byte[] CalculateHash(long blockIndex)
+        {
+            var readCount = _hashReader.ReadArray(blockIndex * _blockSize, _hashBuf, 0, _blockSize);
+            return _hasher.ComputeHash(_hashBuf, 0, readCount);
+        }
 
         public (byte[], int) Read(long blockIndex)
         {
@@ -54,6 +69,7 @@ namespace UdpFile
         {
             _mmf.Dispose();
             _accessor.Dispose();
+            _hasher.Dispose();
         }
 
         public IEnumerator<(byte[], int, long)> GetEnumerator()

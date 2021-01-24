@@ -58,18 +58,44 @@ namespace UdpFile
             var srcFileInfo = new FileInfo(fsNm);
             var cfg = new UdpTransportClientConfig()
             {
-                blockSize = blockSize*1024, srcFileInfo = srcFileInfo,
-                targetAddress = targetAddress, targetFileName = targetFsNm,
-                mode = mode
+                BlockSize = blockSize*1024, SrcFileInfo = srcFileInfo,
+                TargetAddress = targetAddress, TargetFileName = targetFsNm,
+                Mode = mode,CmdSentCount = 2
             };
             #if TestLocal
             LocalMemoryFileTest(srcFileInfo, targetAddress, targetFsNm);
+            TestHasher(cfg);
             #endif
             var watcher = Stopwatch.StartNew();
             watcher.Start();
             await UdpFileClient.Sent(cfg);
             watcher.Stop();
             Console.Out.WriteLine($"finished with time: {watcher.Elapsed}");
+        }
+
+        private static void TestHasher(UdpTransportClientConfig cfg)
+        {
+            using var blockReader = new FileBlockReader(cfg.BlockSize, cfg.SrcFileInfo);
+            for (long i = 0; i < blockReader.MaxBlockIndex; i++)
+            {
+                var hashBuf = blockReader.CalculateHash(i);
+                Console.Write($"{i}: ");
+                foreach (var b in hashBuf)
+                {
+                    Console.Write($"{b:X2} ");
+                }
+                Console.WriteLine();
+            }
+            for (long i = blockReader.MaxBlockIndex - 1; i >= 0; i--)
+            {
+                var hashBuf = blockReader.CalculateHash(i);
+                Console.Write($"{i}: ");
+                foreach (var b in hashBuf)
+                {
+                    Console.Write($"{b:X2} ");
+                }
+                Console.WriteLine();
+            }
         }
 
         private static IPAddress GetIpAddress(string ip)

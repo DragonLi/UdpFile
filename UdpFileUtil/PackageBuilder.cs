@@ -33,5 +33,16 @@ namespace UdpFile
             info.WriteTo(stopPackBuf, offset);
             return (stopPackBuf, stopPackBuf.Length);
         }
+
+        public static (byte[], int) PrepareHashPack(ref CommandPackage cmd, ref VerifyCommandInfo vPack,
+            byte[] hashBuf, long index)
+        {
+            cmd.SeqId = TransportSeqFactory.NextId();
+            vPack.BlockIndex = index;
+            var vBuf = new byte[sizeof(CommandPackage) + sizeof(VerifyCommandInfo) + hashBuf.Length];
+            var offset =cmd.WriteTo(vBuf, 0);
+            vPack.WriteTo(vBuf, offset, hashBuf);
+            return (vBuf, vBuf.Length);
+        }
     }
 }
