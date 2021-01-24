@@ -1,12 +1,28 @@
 using System;
+using System.Runtime.CompilerServices;
 
 namespace UdpFile
 {
-    public static class Logger
+    public static partial class Logger
     {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void Debug(string msg)
         {
+            Debug1(msg);
+        }
+        static partial void Debug1(string msg);
+        #if DEBUG
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        static partial void Debug1(string msg)
+        {
             Console.Write("Debug: ");
+            Console.WriteLine(msg);
+        }
+        #endif
+
+        public static void Warn(string msg)
+        {
+            Console.Write("Warn: ");
             Console.WriteLine(msg);
         }
 

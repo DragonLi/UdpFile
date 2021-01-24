@@ -2,10 +2,17 @@ namespace UdpFile
 {
     public static unsafe class PackageBuilder
     {
-        private static readonly int DataHeadSize = sizeof(CommandPackage) + sizeof(DataCommandInfo);
+        private static readonly int CmdSize = sizeof(CommandPackage);
+        private static readonly int DataCmdSize = sizeof(DataCommandInfo);
+        private static readonly int DataHeadSize = CmdSize + DataCmdSize;
+        private static readonly int StartCmdSize = sizeof(StartCommandInfo);
+        private static readonly int VerifyCmdSize = sizeof(VerifyCommandInfo);
+        private static readonly int StartAckSize = sizeof(StartAckInfo);
+        private static readonly int StopCmdSize = sizeof(StopCommandInfo);
+
         public static (byte[], int) PrepareStartPack(ref CommandPackage cmd,ref StartCommandInfo info,string targetFileName)
         {
-            var size = sizeof(CommandPackage) + sizeof(StartCommandInfo) + 4 * targetFileName.Length;
+            var size = CmdSize + StartCmdSize + 4 * targetFileName.Length;
             var startPackBuf = new byte[size];
             cmd.SeqId = TransportSeqFactory.NextId();
             cmd.Cmd = CommandEnum.Start;
@@ -28,10 +35,10 @@ namespace UdpFile
         {
             cmd.SeqId = TransportSeqFactory.NextId();
             cmd.Cmd = CommandEnum.Stop;
-            var stopPackBuf = new byte[sizeof(CommandPackage) + sizeof(StopCommandInfo)];
-            var offset = cmd.WriteTo(stopPackBuf, 0);
-            info.WriteTo(stopPackBuf, offset);
-            return (stopPackBuf, stopPackBuf.Length);
+            var buf = new byte[CmdSize + StopCmdSize];
+            var offset = cmd.WriteTo(buf, 0);
+            info.WriteTo(buf, offset);
+            return (buf, buf.Length);
         }
 
         public static (byte[], int) PrepareHashPack(ref CommandPackage cmd, ref VerifyCommandInfo vPack,
@@ -39,10 +46,19 @@ namespace UdpFile
         {
             cmd.SeqId = TransportSeqFactory.NextId();
             vPack.BlockIndex = index;
-            var vBuf = new byte[sizeof(CommandPackage) + sizeof(VerifyCommandInfo) + hashBuf.Length];
-            var offset =cmd.WriteTo(vBuf, 0);
-            vPack.WriteTo(vBuf, offset, hashBuf);
-            return (vBuf, vBuf.Length);
+            var buf = new byte[CmdSize + VerifyCmdSize + hashBuf.Length];
+            var offset =cmd.WriteTo(buf, 0);
+            vPack.WriteTo(buf, offset, hashBuf);
+            return (buf, buf.Length);
+        }
+
+        public static (byte[], int) PrepareStartAckPack(ref CommandPackage cmd, ref StartAckInfo ack, string rename)
+        {
+            cmd.SeqId = TransportSeqFactory.NextId();
+            var buf = new byte[CmdSize + StartAckSize + 4 * rename.Length];
+            var offset = cmd.WriteTo(buf, 0);
+            offset += ack.WriteTo(buf, offset, rename);
+            return (buf, offset);
         }
     }
 }

@@ -60,7 +60,7 @@ namespace UdpFile
             {
                 BlockSize = blockSize*1024, SrcFileInfo = srcFileInfo,
                 TargetAddress = targetAddress, TargetFileName = targetFsNm,
-                Mode = mode,CmdSentCount = 2
+                Mode = mode,CmdSentCount = 2,LocalPort=9998
             };
             #if TestLocal
             LocalMemoryFileTest(srcFileInfo, targetAddress, targetFsNm);

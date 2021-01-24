@@ -33,9 +33,15 @@ namespace UdpFile
             var vPack = new VerifyCommandInfo();
             const int maxTimeoutCount = 3;
             const int timeoutInterval = 3 * 1000;
-            var timeoutCount = 0;
             var seqIdTime = new Dictionary<int, DateTime>();
             var tenMinutes = new TimeSpan(0, 10, 0);
+
+            var udpClient = new UdpClient();
+            var cmdSent = new CommandPackage();
+            var startAck = new StartAckInfo();
+            const int sentCount = 2;
+            IPEndPoint clientAddr = null;
+            
             Logger.Debug($"start udp server, port: {listenPort}, store location: {filePrefix}");
             try
             {
@@ -43,27 +49,13 @@ namespace UdpFile
                 while (state != ReceiverState.Stop)
                 {
                     var receiver = listener.ReceiveAsync();
-                    var timeOutSignal = -1;
                     if (state != ReceiverState.Listening)
                     {
-                        while (timeOutSignal ==-1 && timeoutCount < maxTimeoutCount)
+                        if (receiver.Timeout(maxTimeoutCount, timeoutInterval))
                         {
-                            timeOutSignal = Task.WaitAny(new Task[]{receiver}, timeoutInterval);
-                            if (timeOutSignal < 0)
-                            {
-                                timeoutCount++;
-                            }
-                        }
-
-                        if (timeOutSignal >= 0)
-                        {
-                            timeoutCount = 0;
-                        }
-                        else
-                        {
-                            Logger.Err($"timeout, max count: {maxTimeoutCount}, timeout interval: {timeoutInterval}, received: {fileReceiveCount}");
-                            writer?.Dispose();
-                            writer = null;
+                            Logger.Err(
+                                $"timeout, max count: {maxTimeoutCount}, timeout interval: {timeoutInterval}, received: {fileReceiveCount}");
+                            ClearBeforeStop(ref writer, ref clientAddr);
                             break;
                         }
                     }
@@ -142,13 +134,13 @@ namespace UdpFile
                                     seqIdTime[cmd.SeqId] = now + tenMinutes;
                                 }
 
-                                switch (startCmd.OverriteMode)
+                                switch (startCmd.OverrideMode)
                                 {
                                     case OverrideModeEnum.NewOrFail:
                                     {
                                         if (File.Exists(targetFsNm))
                                         {
-                                            Logger.Info($"target file exists, can not override with mode: {startCmd.OverriteMode}");
+                                            Logger.Info($"target file exists, can not override with mode: {startCmd.OverrideMode}");
                                             continue;
                                         }
 
@@ -158,7 +150,7 @@ namespace UdpFile
                                     case OverrideModeEnum.Resume:
                                     case OverrideModeEnum.Rename:
                                     {
-                                        Logger.Err($"not supported override mode: {startCmd.OverriteMode}");
+                                        Logger.Err($"not supported override mode: {startCmd.OverrideMode}");
                                         continue;
                                     }
                                     case OverrideModeEnum.Override:
@@ -173,13 +165,22 @@ namespace UdpFile
                                     }
                                     default:
                                     {
-                                        Logger.Debug($"invalid override mode: {startCmd.OverriteMode}");
+                                        Logger.Debug($"invalid override mode: {startCmd.OverrideMode}");
                                         continue;
                                     }
                                 }
 
                                 writer = new FileBlockDumper(targetFsNm, startCmd.BlockSize, startCmd.TargetFileSize);
                                 state = ReceiverState.Receiving;
+                                clientAddr = udpResult.RemoteEndPoint;
+                                clientAddr.Port = startCmd.ClientPort;
+                                {
+                                    cmdSent.Cmd = CommandEnum.StartAck;
+                                    startAck.AckSeqId = cmd.SeqId;
+                                    startAck.Port = listenPort;
+                                    var (sentBuf, count) = PackageBuilder.PrepareStartAckPack(ref cmdSent, ref startAck, string.Empty);
+                                    await udpClient.EnsureCmdSent(sentBuf, count, clientAddr, sentCount);
+                                }
                                 Logger.Debug($"start transporting: {targetFileName}");
                                 break;
                             }
@@ -240,8 +241,7 @@ namespace UdpFile
                                 {
                                     Logger.Debug($"stop {targetFileName},received: {fileReceiveCount}");
                                     state = ReceiverState.Stop;
-                                    writer?.Dispose();
-                                    writer = null;
+                                    ClearBeforeStop(ref writer, ref clientAddr);
                                 }
                                 var stopInfo = new StopCommandInfo();
                                 stopInfo.ReadFrom(bytes, offset);
@@ -263,6 +263,13 @@ namespace UdpFile
             {
                 listener.Close();
             }
+        }
+
+        private static void ClearBeforeStop(ref FileBlockDumper writer, ref IPEndPoint clientAddr)
+        {
+            writer?.Dispose();
+            writer = null;
+            clientAddr = null;
         }
 
         private static async Task VerifyAsync(FileBlockDumper writer, byte[] vBuf, long blockIndex)
