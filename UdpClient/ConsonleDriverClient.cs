@@ -6,9 +6,9 @@ using System.Threading.Tasks;
 
 namespace UdpFile
 {
-    static class Program
+    internal static class ConsoleDriverClient
     {
-        static async Task Main(string[] args)
+        private static async Task Main(string[] args)
         {
             var fsNm = GetArgs(args,0);
             if (!File.Exists(fsNm))

@@ -13,22 +13,160 @@ namespace UdpFile
         Receiving,
         Stop,
     }
+    
+    public class UdpServerConfig
+    {
+        public int listenPort;
+        public string filePrefix;
+    }
 
     public static class UdpFileServer
     {
-        static async Task Main(string[] args)
+        private static volatile bool _serverIsStop;
+
+        public static void StopServer()
         {
-            ExtractParams(args, out var listenPort, out var filePrefix);
-
+            if (!_serverIsStop)
+                _serverIsStop = true;
+        }
+        
+        public static async Task Start(UdpServerConfig cfg)
+        {
+            var listenPort = cfg.listenPort;
+            var filePrefix = cfg.filePrefix;
             var listener = new UdpClient(listenPort);
-            var filter = new IPEndPoint(IPAddress.Any, listenPort);
-
-            var state = ReceiverState.Listening;
+            //TODO var filter = new IPEndPoint(IPAddress.Any, listenPort);
+            
             var cmd = new CommandPackage();
             var startCmd = new StartCommandInfo();
+            var seqIdTime = new Dictionary<int, DateTime>();
+            var taskList = new List<Task>();
+            var nextPort = listenPort + 1;
+            var targetFileName = string.Empty;
+            
+            Logger.Debug($"start udp server, port: {listenPort}, store location: {filePrefix}");
+            try
+            {
+                // listener.Connect(filter);
+                while (!_serverIsStop)
+                {
+                    var receiver = listener.ReceiveAsync();
+                    while (receiver.Timeout(1, 1000))
+                    {//check every second
+                        if (_serverIsStop)
+                        {
+                            Logger.Debug("notice stop signal");
+                            break;
+                        }
+                        //TODO Recycle Task List
+                    }
+
+                    if (_serverIsStop)
+                    {
+                        break;
+                    }
+                    var udpResult = await receiver;
+                    //TODO Logger.Debug($"received from: {udpResult.RemoteEndPoint}");
+
+                    if (!TryDecodeStartCmd(udpResult, ref cmd, ref startCmd, ref targetFileName, filePrefix)) 
+                        continue;
+                    var port = nextPort;
+                    nextPort++;//in case of exception still work
+                    var task = ReceiveAsync(port, startCmd, targetFileName, udpResult.RemoteEndPoint);
+                    taskList.Add(task);
+                }
+
+                Logger.Debug("server is stopping");
+                await Task.WhenAll(taskList);
+            }
+            catch (SocketException e)
+            {
+                Logger.Err(e);
+            }
+            finally
+            {
+                listener.Close();
+            }
+        }
+
+        private static bool TryDecodeStartCmd(UdpReceiveResult udpResult, ref CommandPackage cmd, 
+            ref StartCommandInfo startCmd, ref string targetFileName, string filePrefix)
+        {
+            var bytes = udpResult.Buffer;
+            var offset = 0;
+            if (!ExtractCmdHeader(ref cmd, bytes, ref offset)) return false;
+
+            if (cmd.Cmd != CommandEnum.Start)
+            {
+                Logger.Warn($"expect start command but {cmd.Cmd} received");
+                return false;
+            }
+            targetFileName = startCmd.ReadFrom(bytes, offset);
+            if (startCmd.BlockSize <= 0)
+            {
+                Logger.Debug("invalid BlockSize");
+                return false;
+            }
+
+            if (startCmd.TargetFileSize <= 0)
+            {
+                Logger.Debug("invalid TargetFileSize");
+                return false;
+            }
+
+            if (targetFileName.Length <= 0)
+            {
+                Logger.Debug("invalid targetFileName");
+                return false;
+            }
+
+            if (Path.IsPathRooted(targetFileName))
+            {
+                Logger.Debug($"target file name can not rooted: {targetFileName}");
+                return false;
+            }
+            var targetFsNm = Path.GetFullPath(Path.Combine(filePrefix,targetFileName));
+            if (Path.EndsInDirectorySeparator(targetFsNm))
+            {
+                Logger.Debug($"targetFileName is not a valid file path: {targetFileName}");
+                return false;
+            }
+
+            if (!targetFsNm.StartsWith(filePrefix))
+            {
+                Logger.Info($"file name attack: {targetFileName}");
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool ExtractCmdHeader(ref CommandPackage cmd, byte[] bytes, ref int offset)
+        {
+            if (bytes.Length <= 0)
+            {
+                Logger.Debug("invalid package length");
+                return false;
+            }
+
+            offset = cmd.ReadFrom(bytes, 0);
+            if (offset <= 0)
+            {
+                Logger.Debug("package format error");
+                return false;
+            }
+
+            return true;
+        }
+
+        private static async Task ReceiveAsync(int port, StartCommandInfo startCmd, string targetFileName,
+            IPEndPoint udpResultRemoteEndPoint)
+        {
+            var listener = new UdpClient(port);
+            var state = ReceiverState.Listening;
+            var cmd = new CommandPackage();
             long fileReceiveCount = 0;
             FileBlockDumper? writer = null;
-            string targetFileName = string.Empty;
             var dataPack = new DataCommandInfo();
             var vPack = new VerifyCommandInfo();
             const int maxTimeoutCount = 3;
@@ -42,14 +180,7 @@ namespace UdpFile
             const int sentCount = 2;
             IPEndPoint clientAddr = null;
             
-            Logger.Debug($"start udp server, port: {listenPort}, store location: {filePrefix}");
-            try
-            {
-                // listener.Connect(filter);
-                while (state != ReceiverState.Stop)
-                {
-                    var receiver = listener.ReceiveAsync();
-                    if (state != ReceiverState.Listening)
+            if (state != ReceiverState.Listening)
                     {
                         if (receiver.Timeout(maxTimeoutCount, timeoutInterval))
                         {
@@ -60,7 +191,7 @@ namespace UdpFile
                         }
                     }
                     var udpResult = await receiver;
-                    // Logger.Debug($"received from: {udpResult.RemoteEndPoint}");
+
                     var bytes = udpResult.Buffer;
                     if (bytes.Length <= 0)
                     {
@@ -253,16 +384,6 @@ namespace UdpFile
                     {
                         Logger.Err(e);
                     }
-                }
-            }
-            catch (SocketException e)
-            {
-                Logger.Err(e);
-            }
-            finally
-            {
-                listener.Close();
-            }
         }
 
         private static void ClearBeforeStop(ref FileBlockDumper writer, ref IPEndPoint clientAddr)
@@ -282,26 +403,5 @@ namespace UdpFile
             //TODO
         }
 
-        private static void ExtractParams(string[] args, out int listenPort, out string filePrefix)
-        {
-            if (args.Length <= 0 || !int.TryParse(args[0], out listenPort))
-            {
-                listenPort = 9999;
-            }
-
-            if (args.Length > 1)
-            {
-                filePrefix = args[1];
-                var t = new DirectoryInfo(filePrefix);
-                if (!t.Exists)
-                {
-                    Logger.Err(
-                        $"invalid store location: {filePrefix}, use current directory instead: {Environment.CurrentDirectory}");
-                    filePrefix = Environment.CurrentDirectory;
-                }
-            }
-            else
-                filePrefix = Environment.CurrentDirectory;
-        }
     }
 }

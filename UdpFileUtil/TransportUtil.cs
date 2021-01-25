@@ -17,7 +17,7 @@ namespace UdpFile
             }
         }
 
-        public static bool Timeout(this Task<UdpReceiveResult> receiver, int maxTimeoutCount, int timeoutInterval)
+        public static bool Timeout(this Task receiver, int maxTimeoutCount, int timeoutInterval)
         {
             var timeOutSignal = -1;
             var timeoutCount = 0;
