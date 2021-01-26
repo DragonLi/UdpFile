@@ -9,7 +9,7 @@ namespace UdpFile
 {
     public enum ReceiverState
     {
-        Listening,
+        //Listening,
         Receiving,
         Stop,
     }
@@ -17,7 +17,8 @@ namespace UdpFile
     public class UdpServerConfig
     {
         public int ListenPort;
-        public string FilePrefix;
+        public string StoreLocation;
+        public TimeSpan ExpiredAdd;//TODO
     }
 
     public static class UdpFileServer
@@ -33,14 +34,14 @@ namespace UdpFile
         public static async Task Start(UdpServerConfig cfg)
         {
             var listenPort = cfg.ListenPort;
-            var filePrefix = cfg.FilePrefix;
+            var filePrefix = cfg.StoreLocation;
             var listener = new UdpClient(listenPort);
             //TODO var filter = new IPEndPoint(IPAddress.Any, listenPort);
             
             var cmd = new CommandPackage();
             var startCmd = new StartCommandInfo();
             var seqIdTime = new Dictionary<int, DateTime>();
-            var tenMinutes = new TimeSpan(0, 10, 0);
+            var tenMinutes = cfg.ExpiredAdd;
             var nextPort = listenPort + 1;
             var clientList = new Dictionary<IPAddress,Task>();
             

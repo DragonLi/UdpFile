@@ -24,8 +24,7 @@ namespace UdpFile
         private static UdpServerConfig ExtractParams(string[] args)
         {
             UdpServerConfig cfg = new();
-            int listenPort;
-            if (args.Length <= 0 || !int.TryParse(args[0], out listenPort))
+            if (args.Length <= 0 || !int.TryParse(args[0], out var listenPort))
             {
                 listenPort = 9999;
             }
@@ -46,7 +45,8 @@ namespace UdpFile
             else
                 filePrefix = Environment.CurrentDirectory;
 
-            cfg.FilePrefix = filePrefix;
+            cfg.StoreLocation = filePrefix;
+            cfg.ExpiredAdd = new TimeSpan(0, 10, 0);
             return cfg;
         }
     }
