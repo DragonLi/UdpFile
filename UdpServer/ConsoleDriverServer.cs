@@ -16,7 +16,7 @@ namespace UdpFile
                 var read = Console.ReadLine();
                 if (read != null)
                     msg = read;
-            } while (msg.Trim().Equals("stop", StringComparison.OrdinalIgnoreCase));
+            } while (!msg.Trim().Equals("stop", StringComparison.OrdinalIgnoreCase));
             UdpFileServer.StopServer();
             await task;
         }

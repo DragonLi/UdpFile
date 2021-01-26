@@ -127,17 +127,20 @@ namespace UdpFile
         public int Port;
         public int RenameFileNameLen;
         // rename file name to string followed, zero mean dot not rename
-        public string ReadFrom(byte[] buf, int start)
+        public string ReadFrom(byte[] buf, int start,out bool isSuccess)
         {
             if (_size + start > buf.Length)
             {
                 AckSeqId = Port = RenameFileNameLen = 0;
+                isSuccess = false;
                 return string.Empty;
             }
             fixed (void* t = &this)
             {
                 BinSerializableHelper.ReadFrom(buf, start, t, _size);
             }
+
+            isSuccess = true;
             return RenameFileNameLen <= 0 ? string.Empty : Encoding.UTF8.GetString(buf, start + _size, RenameFileNameLen);
         }
         

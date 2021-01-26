@@ -33,6 +33,7 @@ namespace UdpFile
         
         public static async Task Start(UdpServerConfig cfg)
         {
+            await Task.Delay(1);
             var listenPort = cfg.ListenPort;
             var filePrefix = cfg.StoreLocation;
             var listener = new UdpClient(listenPort);
@@ -95,7 +96,7 @@ namespace UdpFile
                     }
                     var port = nextPort;
                     nextPort++;//in case of exception still work
-                    var task = ReceiveAsync(port, startCmd, targetFileName, udpResult.RemoteEndPoint, cmd.SeqId);
+                    var task = ReceiveAsync(port, startCmd, targetFileName, udpResult.RemoteEndPoint, cmd.SeqId, tenMinutes);
                     clientList.Add(clientAddr,task);
                 }
 
@@ -172,7 +173,7 @@ namespace UdpFile
             return targetFsNm;
         }
 
-        private static bool CheckIsDuplicatedPackage(int cmdSeq, Dictionary<int, DateTime> seqIdTime, TimeSpan expiredAdd)
+        private static bool CheckIsDuplicatedPackage(int cmdSeq, Dictionary<int, DateTime> seqIdTime, in TimeSpan expiredAdd)
         {
             var now = DateTime.Now;
             if (seqIdTime.TryGetValue(cmdSeq, out var expiredTime) && now < expiredTime)
@@ -203,7 +204,7 @@ namespace UdpFile
         }
 
         private static async Task ReceiveAsync(int port, StartCommandInfo startCmd, string targetFileName,
-            IPEndPoint clientIp,int startSeqId)
+            IPEndPoint clientIp, int startSeqId, TimeSpan expiredAdd)
         {
             if (TargetFilePathIsNotValid(in startCmd, targetFileName)) 
                 return;
@@ -231,10 +232,9 @@ namespace UdpFile
             const int maxTimeoutCount = 3;
             const int timeoutInterval = 3 * 1000;
             var seqIdTime = new Dictionary<int, DateTime>();
-            var expiredAdd = new TimeSpan(0, 10, 0);
             var state = ReceiverState.Receiving;
             var writer = new FileBlockDumper(targetFileName, startCmd.BlockSize, startCmd.TargetFileSize);
-            Logger.Debug($"start transporting: {targetFileName}");
+            Logger.Debug($"start transporting: {targetFileName}, listen port: {port}");
 
             try
             {
@@ -244,7 +244,7 @@ namespace UdpFile
                     if (receiver.Timeout(maxTimeoutCount, timeoutInterval))
                     {
                         Logger.Err(
-                            $"timeout, max count: {maxTimeoutCount}, timeout interval: {timeoutInterval}, received: {fileReceiveCount}");
+                            $"stop {targetFileName}, timeout, max count: {maxTimeoutCount}, timeout interval: {timeoutInterval}, received: {fileReceiveCount}");
                         ClearBeforeStop(ref writer);
                         break;
                     }
@@ -267,8 +267,7 @@ namespace UdpFile
                             var readCount = dataPack.ReadFrom(bytes, offset);
                             offset += readCount;
                             var blockLen = bytes.Length - offset;
-                            if (readCount <=0 || dataPack.BlockIndex< 0 || blockLen > 0 ||
-                                CheckIsDuplicatedPackage(cmd.SeqId, seqIdTime, expiredAdd))
+                            if (readCount <=0 || dataPack.BlockIndex< 0 || blockLen <= 0)
                             {
                                 continue;
                             }
@@ -319,6 +318,7 @@ namespace UdpFile
             {
                 listener.Close();
             }
+            Logger.Debug($"stop listen {port}");
         }
 
         private static bool TargetFilePathIsNotValid(in StartCommandInfo startCmd, string targetFileName)
