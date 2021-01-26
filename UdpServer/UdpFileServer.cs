@@ -40,10 +40,11 @@ namespace UdpFile
             var cmd = new CommandPackage();
             var startCmd = new StartCommandInfo();
             var seqIdTime = new Dictionary<int, DateTime>();
-            var taskList = new List<Task>();
+            var tenMinutes = new TimeSpan(0, 10, 0);
             var nextPort = listenPort + 1;
-            var targetFileName = string.Empty;
+            var clientList = new Dictionary<Task, IPAddress>();
             
+
             Logger.Debug($"start udp server, port: {listenPort}, store location: {filePrefix}");
             try
             {
@@ -52,13 +53,26 @@ namespace UdpFile
                 {
                     var receiver = listener.ReceiveAsync();
                     while (receiver.Timeout(1, 1000))
-                    {//check every second
+                    {
+                        //check every second
                         if (_serverIsStop)
                         {
                             Logger.Debug("notice stop signal");
                             break;
                         }
-                        //TODO Recycle Task List
+
+                        var tmp = new List<Task>(clientList.Count);
+                        foreach (var clientTask in clientList.Keys)
+                        {
+                            if (clientTask.IsCompleted)
+                            {
+                                tmp.Add(clientTask);
+                            }
+                        }
+                        foreach (var k in tmp)
+                        {
+                            clientList.Remove(k);
+                        }
                     }
 
                     if (_serverIsStop)
@@ -66,17 +80,27 @@ namespace UdpFile
                         break;
                     }
                     var udpResult = await receiver;
-                    //TODO Logger.Debug($"received from: {udpResult.RemoteEndPoint}");
+                    //TODO Black List udpResult.RemoteEndPoint
 
-                    if (!TryDecodeStartCmd(udpResult, ref cmd, ref startCmd, ref targetFileName, filePrefix)) 
+                    string targetFileName;
+                    if ((targetFileName = TryDecodeStartCmd(udpResult, ref cmd, ref startCmd, filePrefix, seqIdTime,
+                        tenMinutes)).Equals(string.Empty))
                         continue;
+                    var clientAddr = udpResult.RemoteEndPoint.Address;
+                    if (clientList.ContainsValue(clientAddr))
+                    {
+                        Logger.Warn($"client {clientAddr} is already started");
+                        continue;
+                    }
                     var port = nextPort;
                     nextPort++;//in case of exception still work
-                    var task = ReceiveAsync(port, startCmd, targetFileName, udpResult.RemoteEndPoint);
-                    taskList.Add(task);
+                    var task = ReceiveAsync(port, startCmd, targetFileName, udpResult.RemoteEndPoint, cmd.SeqId);
+                    clientList.Add(task,clientAddr);
                 }
 
                 Logger.Debug("server is stopping");
+                var taskList = new Task[clientList.Count];
+                clientList.Keys.CopyTo(taskList, 0);
                 await Task.WhenAll(taskList);
             }
             catch (SocketException e)
@@ -89,308 +113,279 @@ namespace UdpFile
             }
         }
 
-        private static bool TryDecodeStartCmd(UdpReceiveResult udpResult, ref CommandPackage cmd, 
-            ref StartCommandInfo startCmd, ref string targetFileName, string filePrefix)
+        private static string TryDecodeStartCmd(UdpReceiveResult udpResult, ref CommandPackage cmd, 
+            ref StartCommandInfo startCmd, string filePrefix, Dictionary<int, DateTime> seqIdTime,in TimeSpan expiredAdd)
         {
             var bytes = udpResult.Buffer;
-            var offset = 0;
-            if (!ExtractCmdHeader(ref cmd, bytes, ref offset)) return false;
+            int offset;
+            if ((offset = ExtractCmdHeader(ref cmd, bytes, seqIdTime, expiredAdd)) <= 0)
+                return string.Empty;
 
             if (cmd.Cmd != CommandEnum.Start)
             {
                 Logger.Warn($"expect start command but {cmd.Cmd} received");
-                return false;
+                return string.Empty;
             }
-            targetFileName = startCmd.ReadFrom(bytes, offset);
+            var targetFileName = startCmd.ReadFrom(bytes, offset);
             if (startCmd.BlockSize <= 0)
             {
                 Logger.Debug("invalid BlockSize");
-                return false;
+                return string.Empty;
             }
 
             if (startCmd.TargetFileSize <= 0)
             {
                 Logger.Debug("invalid TargetFileSize");
-                return false;
+                return string.Empty;
             }
 
             if (targetFileName.Length <= 0)
             {
                 Logger.Debug("invalid targetFileName");
-                return false;
+                return string.Empty;
             }
 
             if (Path.IsPathRooted(targetFileName))
             {
                 Logger.Debug($"target file name can not rooted: {targetFileName}");
-                return false;
+                return string.Empty;
             }
             var targetFsNm = Path.GetFullPath(Path.Combine(filePrefix,targetFileName));
             if (Path.EndsInDirectorySeparator(targetFsNm))
             {
                 Logger.Debug($"targetFileName is not a valid file path: {targetFileName}");
-                return false;
+                return string.Empty;
             }
 
             if (!targetFsNm.StartsWith(filePrefix))
             {
                 Logger.Info($"file name attack: {targetFileName}");
-                return false;
+                return string.Empty;
             }
 
-            return true;
+            return targetFileName;
         }
 
-        private static bool ExtractCmdHeader(ref CommandPackage cmd, byte[] bytes, ref int offset)
+        private static int ExtractCmdHeader(ref CommandPackage cmd, byte[] bytes,Dictionary<int, DateTime> seqIdTime,in TimeSpan expiredAdd)
         {
             if (bytes.Length <= 0)
             {
                 Logger.Debug("invalid package length");
-                return false;
+                return 0;
             }
 
-            offset = cmd.ReadFrom(bytes, 0);
+            var offset = cmd.ReadFrom(bytes, 0);
             if (offset <= 0)
             {
                 Logger.Debug("package format error");
-                return false;
+                return 0;
             }
-
-            return true;
+            var now = DateTime.Now;
+            if (seqIdTime.TryGetValue(cmd.SeqId, out var expiredTime) && now < expiredTime)
+            {
+                Logger.Debug("duplicate command received");
+                return 0;
+            }
+            else
+            {
+                seqIdTime[cmd.SeqId] = now + expiredAdd;
+            }
+            return offset;
         }
 
         private static async Task ReceiveAsync(int port, StartCommandInfo startCmd, string targetFileName,
-            IPEndPoint udpResultRemoteEndPoint)
+            IPEndPoint clientIp,int startSeqId)
         {
+            if (TargetFilePathIsNotValid(in startCmd, targetFileName)) 
+                return;
+            var writer = new FileBlockDumper(targetFileName, startCmd.BlockSize, startCmd.TargetFileSize);
+            var udpClient = new UdpClient();
+            var cmdSent = new CommandPackage();
+            var startAck = new StartAckInfo();
+            const int sentCount = 2;
+            var clientAddr = clientIp;
+            clientAddr.Port = startCmd.ClientPort;
+            {
+                cmdSent.Cmd = CommandEnum.StartAck;
+                startAck.AckSeqId = cmd.SeqId;
+                startAck.Port = port;
+                var (sentBuf, count) =
+                    PackageBuilder.PrepareStartAckPack(ref cmdSent, ref startAck, string.Empty);
+                await udpClient.EnsureCmdSent(sentBuf, count, clientAddr, sentCount);
+            }
+            Logger.Debug($"start transporting: {targetFileName}");
+
             var listener = new UdpClient(port);
-            var state = ReceiverState.Listening;
             var cmd = new CommandPackage();
             long fileReceiveCount = 0;
-            FileBlockDumper? writer = null;
             var dataPack = new DataCommandInfo();
             var vPack = new VerifyCommandInfo();
             const int maxTimeoutCount = 3;
             const int timeoutInterval = 3 * 1000;
             var seqIdTime = new Dictionary<int, DateTime>();
-            var tenMinutes = new TimeSpan(0, 10, 0);
+            var expiredAdd = new TimeSpan(0, 10, 0);
+            var state = ReceiverState.Receiving;
 
-            var udpClient = new UdpClient();
-            var cmdSent = new CommandPackage();
-            var startAck = new StartAckInfo();
-            const int sentCount = 2;
-            IPEndPoint clientAddr = null;
-            
-            if (state != ReceiverState.Listening)
+
+            while (state != ReceiverState.Stop)
+            {
+                var receiver = listener.ReceiveAsync();
+                if (receiver.Timeout(maxTimeoutCount, timeoutInterval))
+                {
+                    Logger.Err(
+                        $"timeout, max count: {maxTimeoutCount}, timeout interval: {timeoutInterval}, received: {fileReceiveCount}");
+                    ClearBeforeStop(ref writer);
+                    break;
+                }
+
+                var udpResult = await receiver;
+                if (!udpResult.RemoteEndPoint.Address.Equals(clientIp.Address))
+                {
+                    Logger.Warn($"unintended client:${udpResult.RemoteEndPoint}");
+                    continue;
+                }
+                var bytes = udpResult.Buffer;
+                int offset;
+                if ((offset = ExtractCmdHeader(ref cmd, bytes, seqIdTime, expiredAdd)) <= 0)
+                    continue;
+
+                    switch (cmd.Cmd)
                     {
-                        if (receiver.Timeout(maxTimeoutCount, timeoutInterval))
+                        case CommandEnum.Start:
                         {
-                            Logger.Err(
-                                $"timeout, max count: {maxTimeoutCount}, timeout interval: {timeoutInterval}, received: {fileReceiveCount}");
-                            ClearBeforeStop(ref writer, ref clientAddr);
+                            break;
+                        }
+                        case CommandEnum.Data:
+                        {
+                            if (state != ReceiverState.Receiving)
+                            {
+                                Logger.Debug("incorrect sequence: data package before start command");
+                                continue;
+                            }
+
+                            if (startCmd.BlockSize <= 0)
+                            {
+                                Logger.Debug("invalid BlockSize");
+                                continue;
+                            }
+
+                            offset += dataPack.ReadFrom(bytes, offset);
+                            writer.WriteBlock(dataPack.BlockIndex, bytes, bytes.Length - offset, offset);
+                            fileReceiveCount += bytes.Length - offset;
+                            break;
+                        }
+                        case CommandEnum.Verify:
+                        {
+                            if (state != ReceiverState.Receiving)
+                            {
+                                Logger.Debug("incorrect sequence: file transport not started");
+                                continue;
+                            }
+
+                            //TODO refactor: extract as function
+                            var now = DateTime.Now;
+                            if (seqIdTime.TryGetValue(cmd.SeqId, out var expiredTime) && now < expiredTime)
+                            {
+                                Logger.Debug("duplicate command received");
+                                continue;
+                            }
+                            else
+                            {
+                                seqIdTime[cmd.SeqId] = now + tenMinutes;
+                            }
+
+                            var vBuf = vPack.ReadFrom(bytes, offset);
+                            VerifyAsync(writer, vBuf, vPack.BlockIndex);
+                            break;
+                        }
+                        case CommandEnum.Stop:
+                        {
+                            if (state != ReceiverState.Receiving)
+                            {
+                                Logger.Debug("incorrect sequence: file transport not started");
+                                continue;
+                            }
+
+                            if (fileReceiveCount < startCmd.TargetFileSize)
+                            {
+                                Logger.Debug("stopping, waiting all packages");
+                            }
+                            else
+                            {
+                                Logger.Debug($"stop {targetFileName},received: {fileReceiveCount}");
+                                state = ReceiverState.Stop;
+                                ClearBeforeStop(ref writer);
+                            }
+
+                            var stopInfo = new StopCommandInfo();
+                            stopInfo.ReadFrom(bytes, offset);
                             break;
                         }
                     }
-                    var udpResult = await receiver;
+                
 
-                    var bytes = udpResult.Buffer;
-                    if (bytes.Length <= 0)
-                    {
-                        Logger.Debug("invalid package length");
-                        break;
-                    }
+            }
 
-                    try
-                    {
-                        var offset = cmd.ReadFrom(bytes, 0);
-                        if (offset <= 0)
-                        {
-                            Logger.Debug("package format error");
-                            continue;
-                        }
-                        switch (cmd.Cmd)
-                        {
-                            case CommandEnum.Start:
-                            {
-                                if (writer != null)
-                                {
-                                    Logger.Info("file transport is already started");
-                                    continue;
-                                }
-                                targetFileName = startCmd.ReadFrom(bytes, offset);
-                                if (startCmd.BlockSize <= 0)
-                                {
-                                    Logger.Debug("invalid BlockSize");
-                                    continue;
-                                }
+            try
+            {
 
-                                if (startCmd.TargetFileSize <= 0)
-                                {
-                                    Logger.Debug("invalid TargetFileSize");
-                                    continue;
-                                }
-
-                                if (targetFileName.Length <= 0)
-                                {
-                                    Logger.Debug("invalid targetFileName");
-                                    continue;
-                                }
-
-                                if (Path.IsPathRooted(targetFileName))
-                                {
-                                    Logger.Debug($"target file name can not rooted: {targetFileName}");
-                                    continue;
-                                }
-                                var targetFsNm = Path.GetFullPath(Path.Combine(filePrefix,targetFileName));
-                                if (Path.EndsInDirectorySeparator(targetFsNm))
-                                {
-                                    Logger.Debug($"targetFileName is not a valid file path: {targetFileName}");
-                                    continue;
-                                }
-
-                                if (!targetFsNm.StartsWith(filePrefix))
-                                {
-                                    Logger.Info($"file name attack: {targetFileName}");
-                                    continue;
-                                }
-
-                                //TODO refactor: extract as function
-                                var now = DateTime.Now;
-                                if (seqIdTime.TryGetValue(cmd.SeqId, out var expiredTime) && now < expiredTime)
-                                {
-                                    Logger.Debug("duplicate command received");
-                                    continue;
-                                }
-                                else
-                                {
-                                    seqIdTime[cmd.SeqId] = now + tenMinutes;
-                                }
-
-                                switch (startCmd.OverrideMode)
-                                {
-                                    case OverrideModeEnum.NewOrFail:
-                                    {
-                                        if (File.Exists(targetFsNm))
-                                        {
-                                            Logger.Info($"target file exists, can not override with mode: {startCmd.OverrideMode}");
-                                            continue;
-                                        }
-
-                                        Directory.CreateDirectory(Path.GetDirectoryName(targetFsNm));
-                                        break;
-                                    }
-                                    case OverrideModeEnum.Resume:
-                                    case OverrideModeEnum.Rename:
-                                    {
-                                        Logger.Err($"not supported override mode: {startCmd.OverrideMode}");
-                                        continue;
-                                    }
-                                    case OverrideModeEnum.Override:
-                                    {
-                                        if (File.Exists(targetFsNm) && Directory.Exists(targetFsNm))
-                                        {
-                                            Logger.Err($"target file is already a directory: {targetFsNm}");
-                                            continue;
-                                        }
-                                        Directory.CreateDirectory(Path.GetDirectoryName(targetFsNm));
-                                        break;
-                                    }
-                                    default:
-                                    {
-                                        Logger.Debug($"invalid override mode: {startCmd.OverrideMode}");
-                                        continue;
-                                    }
-                                }
-
-                                writer = new FileBlockDumper(targetFsNm, startCmd.BlockSize, startCmd.TargetFileSize);
-                                state = ReceiverState.Receiving;
-                                clientAddr = udpResult.RemoteEndPoint;
-                                clientAddr.Port = startCmd.ClientPort;
-                                {
-                                    cmdSent.Cmd = CommandEnum.StartAck;
-                                    startAck.AckSeqId = cmd.SeqId;
-                                    startAck.Port = listenPort;
-                                    var (sentBuf, count) = PackageBuilder.PrepareStartAckPack(ref cmdSent, ref startAck, string.Empty);
-                                    await udpClient.EnsureCmdSent(sentBuf, count, clientAddr, sentCount);
-                                }
-                                Logger.Debug($"start transporting: {targetFileName}");
-                                break;
-                            }
-                            case CommandEnum.Data:
-                            {
-                                if (state != ReceiverState.Receiving)
-                                {
-                                    Logger.Debug("incorrect sequence: data package before start command");
-                                    continue;
-                                }
-
-                                if (startCmd.BlockSize <= 0)
-                                {
-                                    Logger.Debug("invalid BlockSize");
-                                    continue;
-                                }
-
-                                offset += dataPack.ReadFrom(bytes, offset);
-                                writer.WriteBlock(dataPack.BlockIndex, bytes, bytes.Length - offset, offset);
-                                fileReceiveCount += bytes.Length - offset;
-                                break;
-                            }
-                            case CommandEnum.Verify:
-                            {
-                                if (state != ReceiverState.Receiving)
-                                {
-                                    Logger.Debug("incorrect sequence: file transport not started");
-                                    continue;
-                                }
-                                //TODO refactor: extract as function
-                                var now = DateTime.Now;
-                                if (seqIdTime.TryGetValue(cmd.SeqId, out var expiredTime) && now < expiredTime)
-                                {
-                                    Logger.Debug("duplicate command received");
-                                    continue;
-                                }
-                                else
-                                {
-                                    seqIdTime[cmd.SeqId] = now + tenMinutes;
-                                }
-
-                                var vBuf = vPack.ReadFrom(bytes, offset);
-                                VerifyAsync(writer, vBuf, vPack.BlockIndex);
-                                break;
-                            }
-                            case CommandEnum.Stop:
-                            {
-                                if (state != ReceiverState.Receiving)
-                                {
-                                    Logger.Debug("incorrect sequence: file transport not started");
-                                    continue;
-                                }
-                                if (fileReceiveCount < startCmd.TargetFileSize)
-                                {
-                                    Logger.Debug("stopping, waiting all packages");
-                                }
-                                else
-                                {
-                                    Logger.Debug($"stop {targetFileName},received: {fileReceiveCount}");
-                                    state = ReceiverState.Stop;
-                                    ClearBeforeStop(ref writer, ref clientAddr);
-                                }
-                                var stopInfo = new StopCommandInfo();
-                                stopInfo.ReadFrom(bytes, offset);
-                                break;
-                            }
-                        }
-                    }
-                    catch (Exception e)
-                    {
-                        Logger.Err(e);
-                    }
+            }
+            catch (Exception e)
+            {
+                Logger.Err(e);
+            }finally
+            {
+                listener.Close();
+            }
         }
 
-        private static void ClearBeforeStop(ref FileBlockDumper writer, ref IPEndPoint clientAddr)
+        private static bool TargetFilePathIsNotValid(in StartCommandInfo startCmd, string targetFileName)
+        {
+            switch (startCmd.OverrideMode)
+            {
+                case OverrideModeEnum.NewOrFail:
+                {
+                    if (File.Exists(targetFileName))
+                    {
+                        Logger.Info(
+                            $"target file exists, can not override with mode: {startCmd.OverrideMode}");
+                        return true;
+                    }
+
+                    Directory.CreateDirectory(Path.GetDirectoryName(targetFileName));
+                    break;
+                }
+                case OverrideModeEnum.Resume:
+                case OverrideModeEnum.Rename:
+                {
+                    Logger.Err($"not supported override mode: {startCmd.OverrideMode}");
+                    return true;
+                }
+                case OverrideModeEnum.Override:
+                {
+                    if (File.Exists(targetFileName) && Directory.Exists(targetFileName))
+                    {
+                        Logger.Err($"target file is already a directory: {targetFileName}");
+                        return true;
+                    }
+
+                    Directory.CreateDirectory(Path.GetDirectoryName(targetFileName));
+                    break;
+                }
+                default:
+                {
+                    Logger.Debug($"invalid override mode: {startCmd.OverrideMode}");
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static void ClearBeforeStop(ref FileBlockDumper writer)
         {
             writer?.Dispose();
             writer = null;
-            clientAddr = null;
         }
 
         private static async Task VerifyAsync(FileBlockDumper writer, byte[] vBuf, long blockIndex)
