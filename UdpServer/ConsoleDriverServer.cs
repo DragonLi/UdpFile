@@ -30,7 +30,7 @@ namespace UdpFile
                 listenPort = 9999;
             }
 
-            cfg.listenPort = listenPort;
+            cfg.ListenPort = listenPort;
             string filePrefix;
             if (args.Length > 1)
             {
@@ -46,7 +46,7 @@ namespace UdpFile
             else
                 filePrefix = Environment.CurrentDirectory;
 
-            cfg.filePrefix = filePrefix;
+            cfg.FilePrefix = filePrefix;
             return cfg;
         }
     }
