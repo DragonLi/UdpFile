@@ -4,12 +4,12 @@ namespace UdpFile
     {
         private static readonly int CmdSize = sizeof(CommandPackage);
         private static readonly int DataCmdSize = sizeof(DataCommandInfo);
-        private static readonly int DataHeadSize = CmdSize + DataCmdSize;
         private static readonly int StartCmdSize = sizeof(StartCommandInfo);
         private static readonly int VerifyCmdSize = sizeof(VerifyCommandInfo);
         private static readonly int StartAckSize = sizeof(StartAckInfo);
         private static readonly int StopCmdSize = sizeof(StopCommandInfo);
-
+        public static readonly int DataHeadSize = CmdSize + DataCmdSize;
+        
         public static (byte[], int) PrepareStartPack(ref CommandPackage cmd,ref StartCommandInfo info,string targetFileName)
         {
             var size = CmdSize + StartCmdSize + 4 * targetFileName.Length;
@@ -42,7 +42,7 @@ namespace UdpFile
         }
 
         public static (byte[], int) PrepareHashPack(ref CommandPackage cmd, ref VerifyCommandInfo vPack,
-            byte[] hashBuf, long index)
+            byte[] hashBuf, int index)
         {
             cmd.SeqId = TransportSeqFactory.NextId();
             vPack.BlockIndex = index;

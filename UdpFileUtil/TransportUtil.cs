@@ -10,7 +10,7 @@ namespace UdpFile
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static async Task EnsureCmdSent(this UdpClient udp, byte[] buf, int count, IPEndPoint target,
             int sentCount)
-        {
+        {//TODO randomly control how much to duplicated sent
             for (var i = 0; i < sentCount; i++)
             {
                 await udp.SendAsync(buf, count, target);

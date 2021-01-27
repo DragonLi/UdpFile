@@ -13,14 +13,14 @@ namespace UdpFile
             var fsNm = GetArgs(args,0);
             if (!File.Exists(fsNm))
             {
-                Console.Out.WriteLine($"File not exists: {fsNm}");
+                Logger.Err($"File not exists: {fsNm}");
                 return;
             }
 
             var ip = GetArgs(args,1);
             if (!IPEndPoint.TryParse(ip, out var targetAddress))
             {
-                Console.Out.WriteLine($"Ip not valid: {ip}");
+                Logger.Err($"Ip not valid: {ip}");
                 return;
             }
 
@@ -29,13 +29,13 @@ namespace UdpFile
             {
                 if (Path.EndsInDirectorySeparator(targetFsNm))
                 {
-                    Console.Out.WriteLine($"target file name must not be a directory: {GetArgs(args,2)}");
+                    Logger.Err($"target file name must not be a directory: {GetArgs(args,2)}");
                     return;
                 }
             }
             catch (Exception e)
             {
-                Console.Out.WriteLine($"Invalid target file name: {GetArgs(args,2)}");
+                Logger.Err($"Invalid target file name: {GetArgs(args,2)}");
                 Console.WriteLine(e);
                 return;
             }
@@ -54,7 +54,7 @@ namespace UdpFile
 
             var mode = EnumHelper.FromInt(modeInt);
 
-            Console.Out.WriteLine($"{fsNm},{ip},{targetFsNm},{blockSize},{mode}");
+            Logger.Info($"{fsNm},{ip},{targetFsNm},{blockSize},{mode}");
             var srcFileInfo = new FileInfo(fsNm);
             var cfg = new UdpTransportClientConfig()
             {
@@ -70,13 +70,13 @@ namespace UdpFile
             watcher.Start();
             await UdpFileClient.Sent(cfg);
             watcher.Stop();
-            Console.Out.WriteLine($"finished with time: {watcher.Elapsed}");
+            Logger.Info($"finished with time: {watcher.Elapsed}");
         }
 
         private static void TestHasher(UdpTransportClientConfig cfg)
         {
             using var blockReader = new FileBlockReader(cfg.BlockSize, cfg.SrcFileInfo);
-            for (long i = 0; i < blockReader.MaxBlockIndex; i++)
+            for (var i = 0; i < blockReader.MaxBlockIndex; i++)
             {
                 var hashBuf = blockReader.CalculateHash(i);
                 Console.Write($"{i}: ");
@@ -86,7 +86,7 @@ namespace UdpFile
                 }
                 Console.WriteLine();
             }
-            for (long i = blockReader.MaxBlockIndex - 1; i >= 0; i--)
+            for (var i = blockReader.MaxBlockIndex - 1; i >= 0; i--)
             {
                 var hashBuf = blockReader.CalculateHash(i);
                 Console.Write($"{i}: ");
@@ -116,7 +116,7 @@ namespace UdpFile
                 LogArray(buf, count,index);
                 dumper.WriteBlock(index, buf, count);
             }
-            Console.Out.WriteLine($"run: diff -s {targetFsNm} {fsNm}");
+            Console.WriteLine($"run: diff -s {targetFsNm} {fsNm}");
             using var diffProc = new Process
             {
                 StartInfo =
@@ -131,23 +131,23 @@ namespace UdpFile
             diffProc.WaitForExit();
         }
 
-        private static void LogArray(byte[] buf, int readCount, long index)
+        private static void LogArray(byte[] buf, int readCount, int index)
         {
             var lineCharNum = 8;
-            var start = index * BufSize;
+            long start = index * BufSize;
             var lineCharIndex = 0;
-            for (int i = 0; i < readCount; i++,++start)
+            for (var i = 0; i < readCount; i++,++start)
             {
                 if (lineCharIndex == 0)
                 {
-                    Console.Out.Write($"{start:x8}: ");
+                    Console.Write($"{start:x8}: ");
                 }
                 if (lineCharIndex < lineCharNum)
                 {
-                    Console.Out.Write($"{buf[i]:x2}");
+                    Console.Write($"{buf[i]:x2}");
                     if (start % 2 == 1)
                     {
-                        Console.Out.Write(' ');
+                        Console.Write(' ');
                     }
                 }
 
@@ -155,7 +155,7 @@ namespace UdpFile
                 if (lineCharIndex == lineCharNum)
                 {
                     lineCharIndex = 0;
-                    Console.Out.WriteLine();
+                    Console.WriteLine();
                 }
             }
         }

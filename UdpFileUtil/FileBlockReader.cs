@@ -7,14 +7,14 @@ using System.Security.Cryptography;
 
 namespace UdpFile
 {
-    public class FileBlockReader : IDisposable, IEnumerable<(byte[],int, long)>
+    public class FileBlockReader : IDisposable, IEnumerable<(byte[],int, int)>
     {
         private readonly byte[] _buf;
         private readonly int _blockSize;
         private readonly MemoryMappedFile _mmf;
         private readonly MemoryMappedViewAccessor _accessor;
         private readonly FileInfo _srcFile;
-        private readonly long _max;
+        private readonly int _max;
         private readonly int _headerSize;
         private readonly MemoryMappedViewAccessor _hashReader;
         private readonly byte[] _hashBuf;
@@ -36,20 +36,20 @@ namespace UdpFile
             _buf = new byte[_headerSize+blockSize];
             var total = srcFile.Length;
             var max = total / blockSize;
-            _max = total - max * blockSize > 0 ? max + 1 : max;
+            _max = (int) (total - max * blockSize > 0 ? max + 1 : max);
         }
 
-        public long MaxBlockIndex => _max;
+        public int MaxBlockIndex => _max;
 
         public int HasherLen => _hasher.HashSize / 8;
 
-        public byte[] CalculateHash(long blockIndex)
+        public byte[] CalculateHash(int blockIndex)
         {
             var readCount = _hashReader.ReadArray(blockIndex * _blockSize, _hashBuf, 0, _blockSize);
             return _hasher.ComputeHash(_hashBuf, 0, readCount);
         }
 
-        public (byte[], int) Read(long blockIndex)
+        public (byte[], int) Read(int blockIndex)
         {
             if (0 > blockIndex || blockIndex >= _max)
             {
@@ -59,7 +59,7 @@ namespace UdpFile
             return (_buf, readCount);
         }
 
-        public byte[] UnsafeRead(long blockIndex, out int readCount)
+        public byte[] UnsafeRead(int blockIndex, out int readCount)
         {
             readCount = _accessor.ReadArray(blockIndex * _blockSize, _buf, _headerSize, _blockSize);
             return _buf;
@@ -70,17 +70,19 @@ namespace UdpFile
             _mmf.Dispose();
             _accessor.Dispose();
             _hasher.Dispose();
+            _hasher.Dispose();
+            _hashReader.Dispose();
         }
 
-        public IEnumerator<(byte[], int, long)> GetEnumerator()
+        public IEnumerator<(byte[], int, int)> GetEnumerator()
         {
             return new FileBlockEnumerator(this);
         }
 
-        private class FileBlockEnumerator : IEnumerator<(byte[], int, long)>
+        private class FileBlockEnumerator : IEnumerator<(byte[], int, int)>
         {
             private readonly FileBlockReader _reader;
-            private long _index;
+            private int _index;
             private readonly long _max;
 
             public FileBlockEnumerator(FileBlockReader reader)
@@ -101,7 +103,7 @@ namespace UdpFile
                 _index = -1;
             }
 
-            public (byte[], int, long) Current
+            public (byte[], int, int) Current
             {
                 get
                 {

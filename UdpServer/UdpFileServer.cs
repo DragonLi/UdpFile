@@ -18,7 +18,7 @@ namespace UdpFile
     {
         public int ListenPort;
         public string StoreLocation;
-        public TimeSpan ExpiredAdd;//TODO
+        public TimeSpan ExpiredAdd;
     }
 
     public static class UdpFileServer
@@ -36,7 +36,7 @@ namespace UdpFile
             await Task.Delay(1);
             var listenPort = cfg.ListenPort;
             var filePrefix = cfg.StoreLocation;
-            var listener = new UdpClient(listenPort);
+            using var listener = new UdpClient(listenPort);
             //TODO var filter = new IPEndPoint(IPAddress.Any, listenPort);
             
             var cmd = new CommandPackage();
@@ -110,10 +110,6 @@ namespace UdpFile
             {
                 Logger.Err(e);
             }
-            finally
-            {
-                listener.Close();
-            }
         }
 
         private static string ExtractStartCmdInfo(UdpReceiveResult udpResult, ref CommandPackage cmd, 
@@ -131,6 +127,11 @@ namespace UdpFile
             }
             
             var targetFileName = startCmd.ReadFrom(bytes, offset);
+            if (startCmd.Version != 1)
+            {
+                Logger.Debug($"incompatible version {startCmd.Version}");
+                return string.Empty;
+            }
             if (startCmd.BlockSize <= 0)
             {
                 Logger.Debug("invalid BlockSize");
@@ -210,18 +211,16 @@ namespace UdpFile
             if (TargetFilePathIsNotValid(in startCmd, targetFileName)) 
                 return;
             
-            var udpClient = new UdpClient();
+            using var udpClient = new UdpClient();
             var cmdSent = new CommandPackage();
-            var startAck = new StartAckInfo();
             const int sentCount = 2;
             var clientAddr = clientIp;
             clientAddr.Port = startCmd.ClientPort;
             cmdSent.Cmd = CommandEnum.StartAck;
-            startAck.AckSeqId = startSeqId;
-            startAck.Port = port;
             //bind port before sent ack!
-            var listener = new UdpClient(port);
-            {
+            using var listener = new UdpClient(port);
+            {//TODO startAck shall be prepare by main thread in ExtractStartCmdInfo as a response
+                var startAck = new StartAckInfo {AckSeqId = startSeqId, Port = port};
                 var (sentBuf, count) =
                     PackageBuilder.PrepareStartAckPack(ref cmdSent, ref startAck, string.Empty);
                 await udpClient.EnsureCmdSent(sentBuf, count, clientAddr, sentCount);
@@ -235,7 +234,10 @@ namespace UdpFile
             const int timeoutInterval = 3 * 1000;
             var seqIdTime = new Dictionary<int, DateTime>();
             var state = ReceiverState.Receiving;
-            var writer = new FileBlockDumper(targetFileName, startCmd.BlockSize, startCmd.TargetFileSize);
+            using var progressRecorder = new ReceiveProgress(startCmd.TargetFileSize, startCmd.BlockSize);
+            using var writer = new FileBlockDumper(targetFileName, startCmd.BlockSize, startCmd.TargetFileSize);
+            using var recorder = new RecordFile(targetFileName, startCmd.TargetFileSize, startCmd.BlockSize,
+                writer.HasherCodeSize, progressRecorder.Size);
             await Task.Delay(1);
             Logger.Debug($"start transporting: {targetFileName}, listen port: {port}");
 
@@ -248,7 +250,6 @@ namespace UdpFile
                     {
                         Logger.Err(
                             $"stop {targetFileName}, timeout, max count: {maxTimeoutCount}, timeout interval: {timeoutInterval}, received: {fileReceiveCount}");
-                        ClearBeforeStop(ref writer);
                         break;
                     }
 
@@ -270,12 +271,14 @@ namespace UdpFile
                             var readCount = dataPack.ReadFrom(bytes, offset);
                             offset += readCount;
                             var blockLen = bytes.Length - offset;
-                            if (readCount <=0 || dataPack.BlockIndex< 0 || blockLen <= 0)
+                            var blockIndex = dataPack.BlockIndex;
+                            if (readCount <=0 || blockIndex< 0 || blockLen <= 0)
                             {
                                 continue;
                             }
-                            writer.WriteBlock(dataPack.BlockIndex, bytes, blockLen, offset);
+                            writer.WriteBlock(blockIndex, bytes, blockLen, offset);
                             fileReceiveCount += blockLen;
+                            progressRecorder.NotifyBlock(blockIndex, writer, recorder);
                             break;
                         }
                         case CommandEnum.Verify:
@@ -286,7 +289,8 @@ namespace UdpFile
                             {
                                 continue;
                             }
-                            VerifyAsync(writer, vBuf, vPack.BlockIndex);
+
+                            VerifyAsync(writer, vBuf, vPack.BlockIndex, recorder, progressRecorder);
                             break;
                         }
                         case CommandEnum.Stop:
@@ -299,7 +303,6 @@ namespace UdpFile
                             {
                                 Logger.Debug($"stop {targetFileName},received: {fileReceiveCount}");
                                 state = ReceiverState.Stop;
-                                ClearBeforeStop(ref writer);
                             }
 
                             var stopInfo = new StopCommandInfo();
@@ -317,9 +320,6 @@ namespace UdpFile
             catch (Exception e)
             {
                 Logger.Err(e);
-            }finally
-            {
-                listener.Close();
             }
             Logger.Debug($"stop listen {port}");
         }
@@ -375,8 +375,10 @@ namespace UdpFile
             writer = null;
         }
 
-        private static async Task VerifyAsync(FileBlockDumper writer, byte[] vBuf, long blockIndex)
+        private static async Task VerifyAsync(FileBlockDumper writer, byte[] vBuf, int blockIndex,
+            RecordFile recorder, ReceiveProgress progressRecorder)
         {
+            progressRecorder.TryVerifyCode(vBuf, blockIndex, writer, recorder);
             var isOk = writer.Verify(blockIndex, vBuf);
             if (!isOk)
             {

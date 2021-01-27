@@ -9,12 +9,10 @@ namespace UdpFile
         Start,
         StartAck,
         Stop,
-        StopAck,
         Data,
         Verify,
         VerifyAck,
         Confirm,
-        ConfirmAck,
     }
 
     public enum OverrideModeEnum : byte
@@ -23,6 +21,23 @@ namespace UdpFile
         Resume,
         Rename,
         Override,
+    }
+
+    public enum StartError : byte
+    {
+        PassCheck,
+        VersionNotCompatible,
+        InvalidTargetFileName,
+        TargetFileExist,
+        TargetFileIsDirectory,
+        RecordPartExistOrDir,
+    }
+
+    public enum StopErrEnum : byte
+    {
+        Success,
+        FileError,
+        Timeout,
     }
 
     public static class EnumHelper
@@ -112,8 +127,8 @@ namespace UdpFile
         public long TargetFileSize;
         public int BlockSize;
         public byte Version;
-        public int ClientPort;
         public OverrideModeEnum OverrideMode;
+        public int ClientPort;
         public int TargetFileNameLength;
         //can not add directly as a member: string TargetFileName;
     }
@@ -125,6 +140,7 @@ namespace UdpFile
         
         public int AckSeqId;
         public int Port;
+        public StartError Err;
         public int RenameFileNameLen;
         // rename file name to string followed, zero mean dot not rename
         public string ReadFrom(byte[] buf, int start,out bool isSuccess)
@@ -180,13 +196,7 @@ namespace UdpFile
             }
         }
 
-        public byte ErrorCode;
-    }
-
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct StopAckInfo
-    {
-        public int AckSeqId;
+        public StopErrEnum ErrorCode;
     }
 
     [StructLayout(LayoutKind.Sequential,Pack = 1)]
@@ -212,7 +222,7 @@ namespace UdpFile
             }
         }
 
-        public long BlockIndex;
+        public int BlockIndex;
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -252,7 +262,7 @@ namespace UdpFile
             }
         }
 
-        public long BlockIndex;
+        public int BlockIndex;
         public int Length;
         //can not add directly as a member: byte[] hash;
     }
@@ -261,12 +271,27 @@ namespace UdpFile
     public unsafe struct VerifyAckInfo
     {
         private static readonly int _size = sizeof(VerifyAckInfo);
-        public long BlockIndex;
+        public int e0;
+        public int e1;
+        public int e2;
+        public int e3;
+        public int e4;
+        public int e5;
+        public int e6;
+        public int e7;
+        public int e8;
+        public int e9;
+        public int e10;
+        public int e11;
+        public int e12;
+        public int e13;
+        public int e14;
+        public int e15;
         public void ReadFrom(byte[] buf, int start)
         {
             if (_size+start > buf.Length)
             {
-                BlockIndex = -1;
+                e0 = e1 = e2 = e3 = e4 = e5 = e6 = e7 = e8 = e9 = e10 = e11 = e12 = e13 = e14 = e15 = -1;
                 return;
             }
             fixed (void* t = &this)
@@ -283,5 +308,4 @@ namespace UdpFile
             }
         }
     }
-    
 }
