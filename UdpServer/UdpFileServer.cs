@@ -44,7 +44,7 @@ namespace UdpFile
             var seqIdTime = new Dictionary<int, DateTime>();
             var tenMinutes = cfg.ExpiredAdd;
             var nextPort = listenPort + 1;
-            var clientList = new Dictionary<IPAddress,Task>();
+            var clientList = new Dictionary<IPEndPoint,Task>();
             
 
             Logger.Debug($"start udp server, port: {listenPort}, store location: {filePrefix}");
@@ -63,7 +63,7 @@ namespace UdpFile
                             break;
                         }
 
-                        var tmp = new List<IPAddress>(clientList.Count);
+                        var tmp = new List<IPEndPoint>(clientList.Count);
                         foreach (var (ip,clientTask) in clientList)
                         {
                             if (clientTask.IsCompleted)
@@ -88,7 +88,7 @@ namespace UdpFile
                         tenMinutes);
                     if (targetFileName.Equals(string.Empty))
                         continue;
-                    var clientAddr = udpResult.RemoteEndPoint.Address;
+                    var clientAddr = udpResult.RemoteEndPoint;
                     if (clientList.TryGetValue(clientAddr,out var oldTask) && !oldTask.IsCompleted)
                     {
                         Logger.Warn($"client {clientAddr} is already started");
@@ -98,6 +98,7 @@ namespace UdpFile
                     nextPort++;//in case of exception still work
                     var task = ReceiveAsync(port, startCmd, targetFileName, udpResult.RemoteEndPoint, cmd.SeqId, tenMinutes);
                     clientList.Add(clientAddr,task);
+                    Logger.Debug($"client added: {clientAddr}");
                 }
 
                 Logger.Debug("server is stopping");
@@ -215,16 +216,17 @@ namespace UdpFile
             const int sentCount = 2;
             var clientAddr = clientIp;
             clientAddr.Port = startCmd.ClientPort;
+            cmdSent.Cmd = CommandEnum.StartAck;
+            startAck.AckSeqId = startSeqId;
+            startAck.Port = port;
+            //bind port before sent ack!
+            var listener = new UdpClient(port);
             {
-                cmdSent.Cmd = CommandEnum.StartAck;
-                startAck.AckSeqId = startSeqId;
-                startAck.Port = port;
                 var (sentBuf, count) =
                     PackageBuilder.PrepareStartAckPack(ref cmdSent, ref startAck, string.Empty);
                 await udpClient.EnsureCmdSent(sentBuf, count, clientAddr, sentCount);
             }
 
-            var listener = new UdpClient(port);
             var cmd = new CommandPackage();
             long fileReceiveCount = 0;
             var dataPack = new DataCommandInfo();
@@ -234,6 +236,7 @@ namespace UdpFile
             var seqIdTime = new Dictionary<int, DateTime>();
             var state = ReceiverState.Receiving;
             var writer = new FileBlockDumper(targetFileName, startCmd.BlockSize, startCmd.TargetFileSize);
+            await Task.Delay(1);
             Logger.Debug($"start transporting: {targetFileName}, listen port: {port}");
 
             try
