@@ -10,9 +10,11 @@ namespace UdpFile
         StartAck,
         Stop,
         Data,
+        DataRestart,
         Verify,
-        VerifyAck,
-        Confirm,
+        VerifyRestart,
+        DataProgress,
+        VerifyProgress,
     }
 
     public enum OverrideModeEnum : byte
@@ -307,5 +309,11 @@ namespace UdpFile
                 BinSerializableHelper.WriteTo(buf, start, t, _size);
             }
         }
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    public unsafe struct RestartAck
+    {
+        public int LastIndex;//use by DataRestart or VerifyRestart, -1 means no need to restart
     }
 }

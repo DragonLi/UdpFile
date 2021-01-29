@@ -60,5 +60,13 @@ namespace UdpFile
             offset += ack.WriteTo(buf, offset, rename);
             return (buf, offset);
         }
+
+        public static (byte[], int) PrepareAskVerifyProgress(ref CommandPackage cmd)
+        {
+            cmd.SeqId = TransportSeqFactory.NextId();
+            var buf = new byte[CmdSize];
+            var offset = cmd.WriteTo(buf, 0);
+            return (buf, offset);
+        }
     }
 }

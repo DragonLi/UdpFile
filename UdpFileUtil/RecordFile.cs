@@ -30,5 +30,10 @@ namespace UdpFile
         public void Dispose()
         {
         }
+
+        public byte[] GetBlockHash(int blockIndex)
+        {
+            
+        }
     }
 }

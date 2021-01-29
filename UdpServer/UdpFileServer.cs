@@ -19,6 +19,8 @@ namespace UdpFile
         public int ListenPort;
         public string StoreLocation;
         public TimeSpan ExpiredAdd;
+        public const int MaxTimeoutCount = 3;
+        public const int TimeoutInterval = 3 * 1000;
     }
 
     public static class UdpFileServer
@@ -117,7 +119,7 @@ namespace UdpFile
         {
             var bytes = udpResult.Buffer;
             int offset;
-            if ((offset = ExtractCmdHeader(ref cmd, bytes)) <= 0)
+            if ((offset = TransportUtil.ExtractCmdHeader(ref cmd, bytes)) <= 0)
                 return string.Empty;
 
             if (cmd.Cmd != CommandEnum.Start)
@@ -187,24 +189,7 @@ namespace UdpFile
             seqIdTime[cmdSeq] = now + expiredAdd;
             return false;
         }
-
-        private static int ExtractCmdHeader(ref CommandPackage cmd, byte[] bytes)
-        {
-            if (bytes.Length <= 0)
-            {
-                Logger.Debug("invalid package length");
-                return 0;
-            }
-
-            var offset = cmd.ReadFrom(bytes, 0);
-            if (offset <= 0)
-            {
-                Logger.Debug("package format error");
-                return 0;
-            }
-            return offset;
-        }
-
+        
         private static async Task ReceiveAsync(int port, StartCommandInfo startCmd, string targetFileName,
             IPEndPoint clientIp, int startSeqId, TimeSpan expiredAdd)
         {
@@ -230,8 +215,6 @@ namespace UdpFile
             long fileReceiveCount = 0;
             var dataPack = new DataCommandInfo();
             var vPack = new VerifyCommandInfo();
-            const int maxTimeoutCount = 3;
-            const int timeoutInterval = 3 * 1000;
             var seqIdTime = new Dictionary<int, DateTime>();
             var state = ReceiverState.Receiving;
             using var progressRecorder = new ReceiveProgress(startCmd.TargetFileSize, startCmd.BlockSize);
@@ -246,10 +229,10 @@ namespace UdpFile
                 while (state != ReceiverState.Stop)
                 {
                     var receiver = listener.ReceiveAsync();
-                    if (receiver.Timeout(maxTimeoutCount, timeoutInterval))
+                    if (receiver.Timeout(UdpServerConfig.MaxTimeoutCount, UdpServerConfig.TimeoutInterval))
                     {
                         Logger.Err(
-                            $"stop {targetFileName}, timeout, max count: {maxTimeoutCount}, timeout interval: {timeoutInterval}, received: {fileReceiveCount}");
+                            $"stop {targetFileName}, timeout, max count: {UdpServerConfig.MaxTimeoutCount}, timeout interval: {UdpServerConfig.TimeoutInterval}, received: {fileReceiveCount}");
                         break;
                     }
 
@@ -261,7 +244,7 @@ namespace UdpFile
                     }
                     var bytes = udpResult.Buffer;
                     int offset;
-                    if ((offset = ExtractCmdHeader(ref cmd, bytes)) <= 0)
+                    if ((offset = TransportUtil.ExtractCmdHeader(ref cmd, bytes)) <= 0)
                         continue;
 
                     switch (cmd.Cmd)

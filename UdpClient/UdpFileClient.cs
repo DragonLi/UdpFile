@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.IO;
 using System.Net;
@@ -16,6 +17,8 @@ namespace UdpFile
         public OverrideModeEnum Mode;
         public int CmdSentCount;
         public int LocalPort;
+        public const int MaxTimeoutCount = 3;
+        public const int TimeoutInterval = 3 * 1000;
     }
     public static class UdpFileClient
     {
@@ -27,7 +30,7 @@ namespace UdpFile
             using var blockReader = new FileBlockReader(cfg.BlockSize, cfg.SrcFileInfo);
             using var udpClient = new UdpClient();
             using var udpReceived = new UdpClient(cfg.LocalPort);
-            var sentCount = 0;
+            var sentCount = new CounterObj();
             var cmd = new CommandPackage();
             
             {
@@ -43,7 +46,15 @@ namespace UdpFile
 
             using var cancelSrc = new CancellationTokenSource();
             var token = cancelSrc.Token;
-            var hashTask = SentHashAsync(cfg, blockReader, udpReceived, token);
+            var verifyIndexMap = new BitArray(blockReader.MaxBlockIndex);
+            var fileInfo = cfg.SrcFileInfo;
+            using var recorder = new RecordFile(fileInfo.FullName, fileInfo.Length, cfg.BlockSize,
+                blockReader.HasherLen, 0);
+            var verifySyncObj = new RestartSync();
+            var dataSyncObj = new RestartSync();
+
+            var ackTask = ReceiveAckAsync(cfg, verifyIndexMap, udpReceived, cancelSrc, dataSyncObj, verifySyncObj);
+            var hashTask = SentHashAsync(cfg, blockReader, verifyIndexMap, token, recorder, verifySyncObj);
             
             var dataInfo = new DataCommandInfo();
             for (var i = 0; i < blockReader.MaxBlockIndex; i++)
@@ -55,7 +66,7 @@ namespace UdpFile
                 {
                     Logger.Warn($"sent count {c} is not consistent with data count: {count}");
                 }
-                sentCount += c - PackageBuilder.DataHeadSize;
+                sentCount.Add(c);
                 if (token.IsCancellationRequested)
                 {
                     Logger.Debug("early stop of data blocks transfer");
@@ -63,14 +74,78 @@ namespace UdpFile
                 }
             }
 
+            do
+            {
+                cmd.Cmd = CommandEnum.DataProgress;
+                {
+                    var (buf, count) = PackageBuilder.PrepareAskVerifyProgress(ref cmd);
+                    await udpClient.SendAsync(buf, count, cfg.TargetAddress);
+                }
+                await Task.Delay(1, token);
+                if (token.IsCancellationRequested || dataSyncObj.IsStop)
+                {
+                    break;
+                }
+
+                if (dataSyncObj.IsStart)
+                {
+                    var startIndex = dataSyncObj.RestartIndex;
+                    for (var i = startIndex; i < blockReader.MaxBlockIndex; i++)
+                    {
+                        dataInfo.BlockIndex = i;
+                        var (buf, count) = PackageBuilder.PrepareDataPack(ref cmd, ref dataInfo, blockReader);
+                        var c = await udpClient.SendAsync(buf, count, cfg.TargetAddress);
+                        if (c != count)
+                        {
+                            Logger.Warn($"sent count {c} is not consistent with data count: {count}");
+                        }
+
+                        sentCount.Add(c);
+                        if (token.IsCancellationRequested)
+                        {
+                            Logger.Debug("early stop of data blocks transfer");
+                            break;
+                        }
+                    }
+                    dataSyncObj.Reset();
+                }
+            } while (!token.IsCancellationRequested);
+
             await hashTask;
+            await ackTask;
             {
                 var stopInfo = new StopCommandInfo();
                 var (buf, count) = PackageBuilder.PrepareStopPack(ref cmd, ref stopInfo);
                 await udpClient.EnsureCmdSent(buf, count, cfg.TargetAddress, cfg.CmdSentCount);
             }
-            
-            Logger.Info($"sent count: {sentCount}");
+
+            Logger.Info($"sent count: {sentCount.Count}, file size: {cfg.SrcFileInfo.Length}");
+        }
+
+        private class CounterObj
+        {
+            private volatile int _count;
+
+            public void Add(int a)
+            {
+                Interlocked.Add(ref _count, a);
+            }
+
+            public int Count => _count;
+        }
+
+        private class RestartSync
+        {
+            public volatile int RestartIndex;
+            public volatile bool IsStart;
+            public volatile bool IsStop;
+
+            public void Reset()
+            {
+                IsStart = false;
+                IsStop = false;
+                Interlocked.Exchange(ref RestartIndex, 0);
+            }
         }
 
         private static async Task<bool> StartServerAsync(UdpClient udpClient, byte[] sentBuf, int count,
@@ -78,7 +153,7 @@ namespace UdpFile
         {
             await udpClient.EnsureCmdSent(sentBuf, count, cfg.TargetAddress, cfg.CmdSentCount);
             const int maxTimeoutCount = 3;
-            const int timeoutInterval = 3 * 1000;
+            const int timeoutInterval = 1 * 1000;
             int timeoutCount = 0;
             do
             {
@@ -150,39 +225,92 @@ namespace UdpFile
         }
 
         private static async Task SentHashAsync(UdpTransportClientConfig cfg, FileBlockReader blockReader,
-            UdpClient udpReceived, CancellationToken cancelToken)
+            BitArray verifyIndexMap, CancellationToken cancelToken, RecordFile recorder, RestartSync verifySyncObj)
         {
             var lastTask = Task.Delay(1);
             await lastTask;
             var udpClient = new UdpClient();
             var cmd = new CommandPackage {Cmd = CommandEnum.Verify};
             var vPack = new VerifyCommandInfo {Length = blockReader.HasherLen};
-            var fileInfo = cfg.SrcFileInfo;
-            using var recorder = new RecordFile(fileInfo.FullName, fileInfo.Length, cfg.BlockSize,
-                blockReader.HasherLen, 0);
-            var verifyIndexMap = new BitArray(blockReader.MaxBlockIndex);
-            var ackTask = ReceiveVerifyAckAsync(verifyIndexMap, udpReceived, cancelToken);
             for (var i = 0; i < blockReader.MaxBlockIndex; i++)
             {
                 var hashBuf = blockReader.CalculateHash(i);
-                recorder.SetVerifyCode(hashBuf, i);
+                if (!verifyIndexMap[i])
+                {
+                    recorder.SetVerifyCode(hashBuf, i);
+                    verifyIndexMap[i] = true;
+                }
                 //PrepareHashPack not thread safe, make sure the internal buffer is sent
                 await lastTask;
                 var (buf, count) = PackageBuilder.PrepareHashPack(ref cmd, ref vPack, hashBuf, i);
-                lastTask = udpClient.EnsureCmdSent(buf, count, cfg.TargetAddress, cfg.CmdSentCount);
+                lastTask = udpClient.SendAsync(buf, count, cfg.TargetAddress);
             }
-            //TODO ask for confirm and check timing
-
-            await ackTask;
+            //rely on receiving loop to signal token cancel of timing
+            do
+            {
+                cmd.Cmd = CommandEnum.VerifyProgress;
+                {
+                    var (buf, count) = PackageBuilder.PrepareAskVerifyProgress(ref cmd);
+                    await udpClient.SendAsync(buf, count, cfg.TargetAddress);
+                }
+                await Task.Delay(1, cancelToken);
+                if (cancelToken.IsCancellationRequested || verifySyncObj.IsStop)
+                {
+                    break;
+                }
+                if (verifySyncObj.IsStart)
+                {
+                    var startIndex = verifySyncObj.RestartIndex;
+                    for (var i = startIndex; i < blockReader.MaxBlockIndex; i++)
+                    {
+                        var hashBuf = recorder.GetBlockHash(i);
+                        //PrepareHashPack not thread safe, make sure the internal buffer is sent
+                        await lastTask;
+                        var (buf, count) = PackageBuilder.PrepareHashPack(ref cmd, ref vPack, hashBuf, i);
+                        lastTask = udpClient.EnsureCmdSent(buf, count, cfg.TargetAddress, cfg.CmdSentCount);
+                    }
+                    verifySyncObj.Reset();
+                }
+            } while (!cancelToken.IsCancellationRequested);
         }
 
-        private static async Task ReceiveVerifyAckAsync(BitArray indexMap, UdpClient udpReceived,
-            CancellationToken cancelToken)
+        private static async Task ReceiveAckAsync(UdpTransportClientConfig cfg, BitArray indexMap,
+            UdpClient udpReceived, CancellationTokenSource cancelSrc, RestartSync dataSyncObj, RestartSync verifySyncObj)
         {
             var cmdHeader = new CommandPackage();
             var ack = new VerifyAckInfo();
-            var receiveTask = udpReceived.ReceiveAsync();
-            //TODO
+            while (!cancelSrc.IsCancellationRequested)
+            {
+                var receiveTask = udpReceived.ReceiveAsync();
+                if (receiveTask.Timeout(UdpTransportClientConfig.MaxTimeoutCount, UdpTransportClientConfig.TimeoutInterval))
+                {
+                    Logger.Err($"stop {cfg.SrcFileInfo.Name}, timeout, max count: {UdpTransportClientConfig.MaxTimeoutCount}, timeout interval: {UdpTransportClientConfig.TimeoutInterval}");
+                    cancelSrc.Cancel();
+                    break;
+                }
+                var udpResult = await receiveTask;
+                if (!udpResult.RemoteEndPoint.Address.Equals(cfg.TargetAddress.Address))
+                {
+                    Logger.Warn($"unintended client:${udpResult.RemoteEndPoint}");
+                    continue;
+                }
+                var bytes = udpResult.Buffer;
+                int offset;
+                if ((offset = TransportUtil.ExtractCmdHeader(ref cmdHeader, bytes)) <= 0)
+                    continue;
+
+                switch (cmdHeader.Cmd)
+                {
+                    case CommandEnum.DataRestart:
+                        break;
+                    case CommandEnum.VerifyRestart:
+                        break;
+                    default:
+                    {
+                        break;
+                    }
+                }
+            }
         }
     }
 }

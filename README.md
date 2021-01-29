@@ -1,7 +1,7 @@
 UdpFile
 使用UDP协议传输大文件的设计方案
 
-27h
+28h
 
 已实现
 内存映射文件方式读写
@@ -12,6 +12,7 @@ UdpFile
 
 TODO
 替换BitArray
+包装UdpClient，增加统计接收和发送的字节数
 过滤SeqID相同的包
 独立文件记录分块写入/发送情况，以及hash值
 字节数组缓冲池

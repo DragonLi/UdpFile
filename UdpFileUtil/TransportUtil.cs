@@ -32,5 +32,22 @@ namespace UdpFile
 
             return timeOutSignal < 0;
         }
+        
+        public static int ExtractCmdHeader(ref CommandPackage cmd, byte[] bytes)
+        {
+            if (bytes.Length <= 0)
+            {
+                Logger.Debug("invalid package length");
+                return 0;
+            }
+
+            var offset = cmd.ReadFrom(bytes, 0);
+            if (offset <= 0)
+            {
+                Logger.Debug("package format error");
+                return 0;
+            }
+            return offset;
+        }
     }
 }
