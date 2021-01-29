@@ -1,4 +1,3 @@
-using System;
 using System.Collections;
 using System.IO;
 using System.Net;
@@ -82,14 +81,14 @@ namespace UdpFile
                     await udpClient.SendAsync(buf, count, cfg.TargetAddress);
                 }
                 await Task.Delay(1, token);
-                if (token.IsCancellationRequested || dataSyncObj.IsStop)
+                if (token.IsCancellationRequested || dataSyncObj.IsStop())
                 {
                     break;
                 }
 
-                if (dataSyncObj.IsStart)
+                var (isStart, startIndex) = dataSyncObj.Read();
+                if (isStart)
                 {
-                    var startIndex = dataSyncObj.RestartIndex;
                     for (var i = startIndex; i < blockReader.MaxBlockIndex; i++)
                     {
                         dataInfo.BlockIndex = i;
@@ -107,7 +106,6 @@ namespace UdpFile
                             break;
                         }
                     }
-                    dataSyncObj.Reset();
                 }
             } while (!token.IsCancellationRequested);
 
@@ -136,15 +134,35 @@ namespace UdpFile
 
         private class RestartSync
         {
-            public volatile int RestartIndex;
-            public volatile bool IsStart;
-            public volatile bool IsStop;
+            private int _prevIndex;
+            private int _restartIndex;
+            private int _stopTag;
 
-            public void Reset()
+            public void Push(int index)
             {
-                IsStart = false;
-                IsStop = false;
-                Interlocked.Exchange(ref RestartIndex, 0);
+                if (index > _restartIndex)
+                {
+                    Interlocked.Exchange(ref _restartIndex, index);
+                }
+            }
+
+            public (bool,int) Read()
+            {
+                var tmp = Interlocked.CompareExchange(ref _restartIndex, 0, 0);
+                var r = (_prevIndex < tmp, tmp);
+                _prevIndex = tmp;
+                return r;
+            }
+
+            public void Stop()
+            {
+                Interlocked.CompareExchange(ref _stopTag, 1, 0);
+            }
+
+            public bool IsStop()
+            {
+                var tmp = Interlocked.CompareExchange(ref _stopTag, 1, 1);
+                return tmp == 1;
             }
         }
 
@@ -225,7 +243,7 @@ namespace UdpFile
         }
 
         private static async Task SentHashAsync(UdpTransportClientConfig cfg, FileBlockReader blockReader,
-            BitArray verifyIndexMap, CancellationToken cancelToken, RecordFile recorder, RestartSync verifySyncObj)
+            BitArray verifyIndexMap, CancellationToken token, RecordFile recorder, RestartSync verifySyncObj)
         {
             var lastTask = Task.Delay(1);
             await lastTask;
@@ -253,14 +271,15 @@ namespace UdpFile
                     var (buf, count) = PackageBuilder.PrepareAskVerifyProgress(ref cmd);
                     await udpClient.SendAsync(buf, count, cfg.TargetAddress);
                 }
-                await Task.Delay(1, cancelToken);
-                if (cancelToken.IsCancellationRequested || verifySyncObj.IsStop)
+                await Task.Delay(1, token);
+                if (token.IsCancellationRequested || verifySyncObj.IsStop())
                 {
                     break;
                 }
-                if (verifySyncObj.IsStart)
+
+                var (isStart, startIndex) = verifySyncObj.Read();
+                if (isStart)
                 {
-                    var startIndex = verifySyncObj.RestartIndex;
                     for (var i = startIndex; i < blockReader.MaxBlockIndex; i++)
                     {
                         var hashBuf = recorder.GetBlockHash(i);
@@ -269,16 +288,15 @@ namespace UdpFile
                         var (buf, count) = PackageBuilder.PrepareHashPack(ref cmd, ref vPack, hashBuf, i);
                         lastTask = udpClient.EnsureCmdSent(buf, count, cfg.TargetAddress, cfg.CmdSentCount);
                     }
-                    verifySyncObj.Reset();
                 }
-            } while (!cancelToken.IsCancellationRequested);
+            } while (!token.IsCancellationRequested);
         }
 
         private static async Task ReceiveAckAsync(UdpTransportClientConfig cfg, BitArray indexMap,
             UdpClient udpReceived, CancellationTokenSource cancelSrc, RestartSync dataSyncObj, RestartSync verifySyncObj)
         {
             var cmdHeader = new CommandPackage();
-            var ack = new VerifyAckInfo();
+            var ack = new AckIndex();
             while (!cancelSrc.IsCancellationRequested)
             {
                 var receiveTask = udpReceived.ReceiveAsync();
@@ -294,19 +312,48 @@ namespace UdpFile
                     Logger.Warn($"unintended client:${udpResult.RemoteEndPoint}");
                     continue;
                 }
-                var bytes = udpResult.Buffer;
+                var buf = udpResult.Buffer;
                 int offset;
-                if ((offset = TransportUtil.ExtractCmdHeader(ref cmdHeader, bytes)) <= 0)
+                if ((offset = TransportUtil.ExtractCmdHeader(ref cmdHeader, buf)) <= 0)
                     continue;
 
                 switch (cmdHeader.Cmd)
                 {
                     case CommandEnum.DataRestart:
+                    {
+                        if (ack.ReadFrom(buf, offset) == 0)
+                        {
+                            Logger.Warn("Invalid Data Restart Package");
+                            break;
+                        }
+                        if (ack.Index < indexMap.Count)
+                            dataSyncObj.Push(ack.Index);
+                        else if (ack.Index == indexMap.Count) 
+                            dataSyncObj.Stop();
                         break;
+                    }
                     case CommandEnum.VerifyRestart:
+                    {
+                        if (ack.ReadFrom(buf, offset) == 0)
+                        {
+                            Logger.Warn("Invalid Data Restart Package");
+                            break;
+                        }
+                        if (ack.Index < indexMap.Count)
+                            verifySyncObj.Push(ack.Index);
+                        else if (ack.Index == indexMap.Count) 
+                            verifySyncObj.Stop();
                         break;
+                    }
+                    case CommandEnum.Stop:
+                    {
+                        Logger.Warn("Early Stop by Server");
+                        cancelSrc.Cancel();
+                        break;
+                    }
                     default:
                     {
+                        Logger.Warn($"Unexpected command: {cmdHeader.Cmd}");
                         break;
                     }
                 }

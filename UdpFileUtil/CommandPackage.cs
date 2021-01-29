@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -52,17 +53,20 @@ namespace UdpFile
 
     public static class BinSerializableHelper
     {
-        public static unsafe void WriteTo(byte[] buf, int start,void* input, int size)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static unsafe void WriteTo<T>(byte[] buf, int start,ref T input, int size)
         {
             var target = new Span<byte>(buf, start, size);
-            var src = new Span<byte>(input, size);
+            var src = new Span<byte>(Unsafe.AsPointer(ref input), size);
             src.CopyTo(target);
         }
-
-        public static unsafe void ReadFrom(byte[] buf, int start, void* output, int size)
+        
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static unsafe void ReadFrom<T>(byte[] buf, int start, ref T output, int size)
+        where T:struct
         {
             var src = new Span<byte>(buf, start, size);
-            var target = new Span<byte>(output, size);
+            var target = new Span<byte>(Unsafe.AsPointer(ref output), size);
             src.CopyTo(target);
         }
     }
@@ -74,23 +78,15 @@ namespace UdpFile
         public int ReadFrom(byte[] buf, int start)
         {
             if (_size + start > buf.Length)
-            {
                 return 0;
-            }
-            fixed (void* t = &this)
-            {
-                BinSerializableHelper.ReadFrom(buf, start, t, _size);
-            }
+            BinSerializableHelper.ReadFrom(buf, start, ref this, _size);
             return _size;
         }
 
         public int WriteTo(byte[] buf, int start)
         {
-            fixed (void* t = &this)
-            {
-                BinSerializableHelper.WriteTo(buf, start, t, _size);
-                return _size;
-            }
+            BinSerializableHelper.WriteTo(buf, start, ref this, _size);
+            return _size;
         }
         public int SeqId;
         public CommandEnum Cmd;
@@ -108,22 +104,16 @@ namespace UdpFile
                 BlockSize = TargetFileNameLength = 0;
                 return string.Empty;
             }
-            fixed (void* t = &this)
-            {
-                BinSerializableHelper.ReadFrom(buf, start, t, _size);
-                return TargetFileNameLength <= 0 ? string.Empty : Encoding.UTF8.GetString(buf, start + _size, TargetFileNameLength);
-            }
+            BinSerializableHelper.ReadFrom(buf, start, ref this, _size);
+            return TargetFileNameLength <= 0 ? string.Empty : Encoding.UTF8.GetString(buf, start + _size, TargetFileNameLength);
         }
 
         public int WriteTo(byte[] buf, int start, string targetFileName)
         {
-            fixed (void* t = &this)
-            {
-                TargetFileNameLength =
-                    Encoding.UTF8.GetBytes(targetFileName, 0, targetFileName.Length, buf, start + _size);
-                BinSerializableHelper.WriteTo(buf, start, t, _size);
-                return _size + TargetFileNameLength;
-            }
+            TargetFileNameLength =
+                Encoding.UTF8.GetBytes(targetFileName, 0, targetFileName.Length, buf, start + _size);
+            BinSerializableHelper.WriteTo(buf, start, ref this, _size);
+            return _size + TargetFileNameLength;
         }
 
         public long TargetFileSize;
@@ -153,10 +143,7 @@ namespace UdpFile
                 isSuccess = false;
                 return string.Empty;
             }
-            fixed (void* t = &this)
-            {
-                BinSerializableHelper.ReadFrom(buf, start, t, _size);
-            }
+            BinSerializableHelper.ReadFrom(buf, start, ref this, _size);
 
             isSuccess = true;
             return RenameFileNameLen <= 0 ? string.Empty : Encoding.UTF8.GetString(buf, start + _size, RenameFileNameLen);
@@ -164,13 +151,10 @@ namespace UdpFile
         
         public int WriteTo(byte[] buf, int start, string renameFileName)
         {
-            fixed (void* t = &this)
-            {
-                RenameFileNameLen =
-                    Encoding.UTF8.GetBytes(renameFileName, 0, renameFileName.Length, buf, start + _size);
-                BinSerializableHelper.WriteTo(buf, start, t, _size);
-                return _size + RenameFileNameLen;
-            }
+            RenameFileNameLen =
+                Encoding.UTF8.GetBytes(renameFileName, 0, renameFileName.Length, buf, start + _size);
+            BinSerializableHelper.WriteTo(buf, start, ref this, _size);
+            return _size + RenameFileNameLen;
         }
     }
 
@@ -181,21 +165,13 @@ namespace UdpFile
         public void ReadFrom(byte[] buf, int start)
         {
             if (_size + start > buf.Length)
-            {
                 return;
-            }
-            fixed (void* t = &this)
-            {
-                BinSerializableHelper.ReadFrom(buf, start, t, _size);
-            }
+            BinSerializableHelper.ReadFrom(buf, start, ref this, _size);
         }
 
         public void WriteTo(byte[] buf, int start)
         {
-            fixed (void* t = &this)
-            {
-                BinSerializableHelper.WriteTo(buf, start, t, _size);
-            }
+            BinSerializableHelper.WriteTo(buf, start, ref this, _size);
         }
 
         public StopErrEnum ErrorCode;
@@ -209,19 +185,13 @@ namespace UdpFile
         {
             if (_size + start > buf.Length)
                 return 0;
-            fixed (void* t = &this)
-            {
-                BinSerializableHelper.ReadFrom(buf, start, t, _size);
-            }
+            BinSerializableHelper.ReadFrom(buf, start, ref this, _size);
             return _size;
         }
 
         public void WriteTo(byte[] buf, int start)
         {
-            fixed (void* t = &this)
-            {
-                BinSerializableHelper.WriteTo(buf, start, t, _size);
-            }
+            BinSerializableHelper.WriteTo(buf, start, ref this, _size);
         }
 
         public int BlockIndex;
@@ -239,29 +209,21 @@ namespace UdpFile
                 return Array.Empty<byte>();
             }
             
-            fixed (void* t = &this)
+            BinSerializableHelper.ReadFrom(buf, start, ref this, _size);
+            if (Length <= 0)
             {
-                BinSerializableHelper.ReadFrom(buf, start, t, _size);
-                if (Length <= 0)
-                {
-                    return Array.Empty<byte>();
-                }
-                else
-                {
-                    var hash = new byte[Length];
-                    Buffer.BlockCopy(buf, start + _size, hash, 0, Length);
-                    return hash;
-                }
+                return Array.Empty<byte>();
             }
+
+            var hash = new byte[Length];
+            Buffer.BlockCopy(buf, start + _size, hash, 0, Length);
+            return hash;
         }
         public void WriteTo(byte[] buf, int start,byte[] verificationList)
         {
-            fixed (void* t = &this)
-            {
-                Length = verificationList.Length;
-                BinSerializableHelper.WriteTo(buf, start, t, _size);
-                Buffer.BlockCopy(verificationList, 0, buf, start + _size, Length);
-            }
+            Length = verificationList.Length;
+            BinSerializableHelper.WriteTo(buf, start, ref this, _size);
+            Buffer.BlockCopy(verificationList, 0, buf, start + _size, Length);
         }
 
         public int BlockIndex;
@@ -296,24 +258,32 @@ namespace UdpFile
                 e0 = e1 = e2 = e3 = e4 = e5 = e6 = e7 = e8 = e9 = e10 = e11 = e12 = e13 = e14 = e15 = -1;
                 return;
             }
-            fixed (void* t = &this)
-            {
-                BinSerializableHelper.ReadFrom(buf, start, t, _size);
-            }
+            BinSerializableHelper.ReadFrom(buf, start, ref this, _size);
         }
 
         public void WriteTo(byte[] buf, int start)
         {
-            fixed (void* t = &this)
-            {
-                BinSerializableHelper.WriteTo(buf, start, t, _size);
-            }
+            BinSerializableHelper.WriteTo(buf, start, ref this, _size);
         }
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public unsafe struct RestartAck
+    public unsafe struct AckIndex
     {
-        public int LastIndex;//use by DataRestart or VerifyRestart, -1 means no need to restart
+        private static readonly int _size = sizeof(AckIndex);
+        public int ReadFrom(byte[] buf, int start)
+        {
+            if (_size + start > buf.Length)
+                return 0;
+            BinSerializableHelper.ReadFrom(buf, start, ref this, _size);
+            return _size;
+        }
+
+        public void WriteTo(byte[] buf, int start)
+        {
+            BinSerializableHelper.WriteTo(buf, start, ref this, _size);
+        }
+
+        public int Index;//use by DataRestart or VerifyRestart, -1 means no need to restart
     }
 }
