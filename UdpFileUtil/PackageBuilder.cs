@@ -9,7 +9,8 @@ namespace UdpFile
         private static readonly int StartAckSize = sizeof(StartAckInfo);
         private static readonly int StopCmdSize = sizeof(StopCommandInfo);
         public static readonly int DataHeadSize = CmdSize + DataCmdSize;
-        
+        private static readonly int AckIndexSize = sizeof(AckIndex);
+
         public static (byte[], int) PrepareStartPack(ref CommandPackage cmd,ref StartCommandInfo info,string targetFileName)
         {
             var size = CmdSize + StartCmdSize + 4 * targetFileName.Length;
@@ -67,6 +68,15 @@ namespace UdpFile
             var buf = new byte[CmdSize];
             var offset = cmd.WriteTo(buf, 0);
             return (buf, offset);
+        }
+
+        public static (byte[],int) PrepareAckIndex(ref CommandPackage cmd, ref AckIndex ackIndex)
+        {
+            cmd.SeqId = TransportSeqFactory.NextId();
+            var buf = new byte[CmdSize + AckIndexSize];
+            var offset = cmd.WriteTo(buf, 0);
+            ackIndex.WriteTo(buf, offset);
+            return (buf, CmdSize + AckIndexSize);
         }
     }
 }

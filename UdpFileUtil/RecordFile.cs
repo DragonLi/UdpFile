@@ -33,7 +33,7 @@ namespace UdpFile
 
         public byte[] GetBlockHash(int blockIndex)
         {
-            
+            return new byte[64];//TODO
         }
     }
 }

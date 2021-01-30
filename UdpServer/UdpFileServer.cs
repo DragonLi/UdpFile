@@ -215,6 +215,7 @@ namespace UdpFile
             long fileReceiveCount = 0;
             var dataPack = new DataCommandInfo();
             var vPack = new VerifyCommandInfo();
+            var ackIndex = new AckIndex();
             var seqIdTime = new Dictionary<int, DateTime>();
             var state = ReceiverState.Receiving;
             using var progressRecorder = new ReceiveProgress(startCmd.TargetFileSize, startCmd.BlockSize);
@@ -224,6 +225,8 @@ namespace UdpFile
             await Task.Delay(1);
             Logger.Debug($"start transporting: {targetFileName}, listen port: {port}");
 
+            var naiveDataProgress = 0;
+            var naiveHashProgress = 0;
             try
             {
                 while (state != ReceiverState.Stop)
@@ -262,18 +265,39 @@ namespace UdpFile
                             writer.WriteBlock(blockIndex, bytes, blockLen, offset);
                             fileReceiveCount += blockLen;
                             progressRecorder.NotifyBlock(blockIndex, writer, recorder);
+                            if (naiveDataProgress < blockIndex)
+                                naiveDataProgress = blockIndex;
                             break;
                         }
                         case CommandEnum.Verify:
                         {
                             var vBuf = vPack.ReadFrom(bytes, offset);
-                            if (vBuf.Length <= 0 || vPack.BlockIndex < 0 ||
+                            var hashIndex = vPack.BlockIndex;
+                            if (vBuf.Length <= 0 || hashIndex < 0 ||
                                 CheckIsDuplicatedPackage(cmd.SeqId, seqIdTime, expiredAdd))
                             {
                                 continue;
                             }
 
-                            VerifyAsync(writer, vBuf, vPack.BlockIndex, recorder, progressRecorder);
+                            VerifyAsync(writer, vBuf, hashIndex, recorder, progressRecorder);
+                            if (naiveHashProgress < hashIndex)
+                                naiveHashProgress = hashIndex;
+                            break;
+                        }
+                        case CommandEnum.VerifyProgress:
+                        {
+                            cmd.Cmd = CommandEnum.VerifyRestart;
+                            ackIndex.Index = naiveHashProgress + 1;
+                            var (buf, count) = PackageBuilder.PrepareAckIndex(ref cmd, ref ackIndex);
+                            await udpClient.EnsureCmdSent(buf, count, clientAddr, sentCount);
+                            break;
+                        }
+                        case CommandEnum.DataProgress:
+                        {
+                            cmd.Cmd = CommandEnum.DataRestart;
+                            ackIndex.Index = naiveDataProgress + 1;
+                            var (buf, count) = PackageBuilder.PrepareAckIndex(ref cmd, ref ackIndex);
+                            await udpClient.EnsureCmdSent(buf, count, clientAddr, sentCount);
                             break;
                         }
                         case CommandEnum.Stop:
@@ -350,12 +374,6 @@ namespace UdpFile
             }
 
             return false;
-        }
-
-        private static void ClearBeforeStop(ref FileBlockDumper writer)
-        {
-            writer?.Dispose();
-            writer = null;
         }
 
         private static async Task VerifyAsync(FileBlockDumper writer, byte[] vBuf, int blockIndex,

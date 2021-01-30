@@ -121,6 +121,8 @@ namespace UdpFile
         public byte Version;
         public OverrideModeEnum OverrideMode;
         public int ClientPort;
+        public int StartBlockIndex;
+        public int StartHashIndex;
         public int TargetFileNameLength;
         //can not add directly as a member: string TargetFileName;
     }
@@ -201,33 +203,28 @@ namespace UdpFile
     public unsafe struct VerifyCommandInfo
     {
         private static readonly int _size = sizeof(VerifyCommandInfo);
+        private const int HasherSize = 512 / 8;
         public byte[] ReadFrom(byte[] buf, int start)
         {
-            if (_size + start > buf.Length)
+            if (_size + start + HasherSize > buf.Length)
             {
-                //BlockIndex = Length = 0;
+                //BlockIndex = -1;
                 return Array.Empty<byte>();
             }
             
             BinSerializableHelper.ReadFrom(buf, start, ref this, _size);
-            if (Length <= 0)
-            {
-                return Array.Empty<byte>();
-            }
 
-            var hash = new byte[Length];
-            Buffer.BlockCopy(buf, start + _size, hash, 0, Length);
+            var hash = new byte[HasherSize];
+            Buffer.BlockCopy(buf, start + _size, hash, 0, HasherSize);
             return hash;
         }
         public void WriteTo(byte[] buf, int start,byte[] verificationList)
         {
-            Length = verificationList.Length;
             BinSerializableHelper.WriteTo(buf, start, ref this, _size);
-            Buffer.BlockCopy(verificationList, 0, buf, start + _size, Length);
+            Buffer.BlockCopy(verificationList, 0, buf, start + _size, HasherSize);
         }
 
         public int BlockIndex;
-        public int Length;
         //can not add directly as a member: byte[] hash;
     }
 
