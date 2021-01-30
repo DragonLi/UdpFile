@@ -68,7 +68,8 @@ namespace UdpFile
                 lastDataTask = udpClient.SendAsync(buf, count, cfg.TargetAddress);
             }
             //tail task no need to await
-
+            
+            await Task.Delay(1, token);
             cmd.Cmd = CommandEnum.DataProgress;
             while (!token.IsCancellationRequested && !dataSyncObj.IsStop())
             {
@@ -304,7 +305,7 @@ namespace UdpFile
                             Logger.Warn("Invalid Data Restart Package");
                             break;
                         }
-                        Logger.Debug($"{ack.Index}");
+                        Logger.Debug($"{cmdHeader.Cmd}:{ack.Index}");
                         if (ack.Index < indexMap.Count)
                             dataSyncObj.Push(ack.Index);
                         else if (ack.Index == indexMap.Count) 
@@ -318,7 +319,7 @@ namespace UdpFile
                             Logger.Warn("Invalid Data Restart Package");
                             break;
                         }
-                        Logger.Debug($"{ack.Index}");
+                        Logger.Debug($"{cmdHeader.Cmd}:{ack.Index}");
                         if (ack.Index < indexMap.Count)
                             verifySyncObj.Push(ack.Index);
                         else if (ack.Index == indexMap.Count) 

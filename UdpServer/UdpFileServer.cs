@@ -77,6 +77,11 @@ namespace UdpFile
                         {
                             clientList.Remove(k);
                         }
+
+                        if (clientList.Count == 0)
+                        {
+                            nextPort = listenPort + 1;
+                        }
                     }
 
                     if (_serverIsStop)
@@ -267,6 +272,14 @@ namespace UdpFile
                             progressRecorder.NotifyBlock(blockIndex, writer, recorder);
                             if (naiveDataProgress < blockIndex)
                                 naiveDataProgress = blockIndex;
+                            if (fileReceiveCount >= startCmd.TargetFileSize)
+                            {
+                                cmd.Cmd = CommandEnum.DataRestart;
+                                ackIndex.Index = writer.MaxBlockIndex;
+                                var (buf, count) = PackageBuilder.PrepareAckIndex(ref cmd, ref ackIndex);
+                                await udpClient.EnsureCmdSent(buf, count, clientAddr, sentCount);
+                                break;
+                            }
                             break;
                         }
                         case CommandEnum.Verify:
